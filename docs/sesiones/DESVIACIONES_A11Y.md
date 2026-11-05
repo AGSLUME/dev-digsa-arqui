@@ -38,6 +38,16 @@ ni los textos ni los `data-testid`:
 Quedan como el monolito (mejoras sin bloqueo): grupos del menú lateral sin `role="group"`, «Acceso restringido.» sin h1, ícono de «Menú»
 que no cambia a «×», ayudas emergentes no «hoverables» (repiten el nombre accesible; Escape las cierra en cualquier momento).
 
+## Lint de accesibilidad (`@angular-eslint`, conjunto accessibility)
+
+Primera corrida (2026-11-05, `ng lint` en el CI desde entonces): 3 hallazgos, ninguno choca con la paridad, los 3 corregidos:
+- `lume-campo` aceptaba el id del control con el alias `id`: el mismo id quedaba en el elemento `lume-campo` y en su `<input>` (id
+  repetido). Ahora es `idControl` (prueba en `campo.spec.ts`).
+- El Escape del panel del menú estaba escuchado en `header` y `nav` (contenedores no enfocables): pasó a un escuchador del documento,
+  activo solo con el panel abierto (prueba en `e2e/pruebas/teclado.spec.ts`).
+
+No hay reglas desactivadas.
+
 ## Mejoras ya aplicadas (no son desviaciones)
 
 Enlaces y botones azules dentro de alertas a --lume-blue (bloqueante AA corregido, con prueba en `tema.spec.ts`), reflow de botones e

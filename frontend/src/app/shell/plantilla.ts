@@ -54,6 +54,8 @@ function guardarPreferencia(colapsado: boolean): void {
     class: 'lume-shell',
     '[class.lume-shell--colapsado]': 'colapsado()',
     '[class.lume-shell--celular]': 'celular()',
+    // Escape cierra el panel del menú en celular (no hace nada si no está abierto)
+    '(document:keydown.escape)': 'cerrarPanel()',
   },
 })
 export class Plantilla {

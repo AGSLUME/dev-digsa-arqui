@@ -5,7 +5,7 @@ import { FORMULARIO_LUME } from './index';
 @Component({
   imports: [...FORMULARIO_LUME],
   template: `
-    <lume-campo id="usuario" etiqueta="Usuario" descripcion="Como lo asignó el administrador." [error]="error()">
+    <lume-campo idControl="usuario" etiqueta="Usuario" descripcion="Como lo asignó el administrador." [error]="error()">
       <input lumeEntrada name="usuario" />
     </lume-campo>
     <lume-campo etiqueta="Contraseña" clave><input lumeEntrada name="clave" /></lume-campo>
@@ -31,6 +31,9 @@ describe('lume-campo y lumeEntrada', () => {
     const { f, el } = await montar();
     const usuario = el.querySelector<HTMLInputElement>('input[name="usuario"]')!;
     expect(usuario.id).toBe('usuario');
+    // El id es solo del control: si quedara también en <lume-campo> habría dos elementos con el mismo id
+    expect(el.querySelectorAll('#usuario')).toHaveLength(1);
+    expect(el.querySelector('lume-campo')!.hasAttribute('id')).toBe(false);
     expect(usuario.getAttribute('aria-describedby')).toBe('usuario-descripcion');
     f.componentInstance.error.set('Escriba el usuario.');
     await f.whenStable();
