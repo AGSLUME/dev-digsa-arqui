@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, input, OnInit, signal, viewChild } from '@angular/core';
 import { Title } from '@angular/platform-browser';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { IngresoApi } from '../../api/seguridad';
 import { FORMULARIO_LUME } from '../../ui';
@@ -117,8 +117,12 @@ export class OlvideClave {
 })
 export class DefinirClave implements OnInit {
   private readonly api = inject(IngresoApi);
-  /** `?tkn=` del enlace del correo. */
+  private readonly router = inject(Router);
+  private readonly ruta = inject(ActivatedRoute);
+  /** `?tkn=` del enlace del correo: se lee una vez y se borra de la dirección (no queda en el historial ni en el Referer). */
   readonly tkn = input<string | undefined>(undefined);
+  /** El token, solo en memoria. */
+  private token = '';
   protected readonly ENLACE_INVALIDO = ENLACE_INVALIDO;
   protected readonly valido = signal<boolean | null>(null);
   protected readonly nombre = signal('');
@@ -133,8 +137,12 @@ export class DefinirClave implements OnInit {
   }
 
   async ngOnInit(): Promise<void> {
+    this.token = this.tkn() ?? '';
+    if (this.tkn() !== undefined) {
+      void this.router.navigate([], { relativeTo: this.ruta, queryParams: { tkn: null }, queryParamsHandling: 'merge', replaceUrl: true });
+    }
     try {
-      const r = await firstValueFrom(this.api.consultarEnlace(this.tkn() ?? ''));
+      const r = await firstValueFrom(this.api.consultarEnlace(this.token));
       this.nombre.set(r.nombre ?? '');
       this.valido.set(r.valido);
     } catch {
@@ -151,7 +159,7 @@ export class DefinirClave implements OnInit {
     this.enviando.set(true);
     try {
       const r = await firstValueFrom(
-        this.api.definirClave({ tkn: this.tkn() ?? '', clave: this.clave(), confirmacion: this.confirmacion() }),
+        this.api.definirClave({ tkn: this.token, clave: this.clave(), confirmacion: this.confirmacion() }),
       );
       this.hecho.set(r.mensaje);
     } catch (x) {

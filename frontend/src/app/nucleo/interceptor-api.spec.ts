@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { firstValueFrom } from 'rxjs';
 import { CLAVE_ACTIVIDAD, CLAVE_MOTIVO } from './actividad';
 import { ErrorApi, SIN_CONEXION } from './error-api';
-import { interceptorApi } from './interceptor-api';
+import { interceptorApi, mismoOrigen } from './interceptor-api';
 import { NAVEGADOR, RUTAS_BFF, Sesion } from './sesion';
 import { proveerClientesApi } from './proveedores';
 
@@ -174,5 +174,16 @@ describe('interceptorApi (como shared/api.ts del monolito)', () => {
     await fallo(p);
     expect(sessionStorage.getItem(CLAVE_MOTIVO)).toBeNull();
     expect(asignar).not.toHaveBeenCalled();
+  });
+});
+
+describe('mismoOrigen', () => {
+  const origen = 'http://localhost:4220';
+  it('las rutas relativas sí; //otro, /\otro y las absolutas a otro origen no', () => {
+    expect(mismoOrigen('/api/sesion', origen)).toBe(true);
+    expect(mismoOrigen('http://localhost:4220/api/x', origen)).toBe(true);
+    for (const u of ['//otro.example/x', '/\\otro.example/x', 'https://otro.example/x', 'http://localhost:9999/x']) {
+      expect(mismoOrigen(u, origen), u).toBe(false);
+    }
   });
 });

@@ -5,7 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import { IngresoApi, type Paso } from '../../api/seguridad';
 import { tomarMotivo } from '../../nucleo/actividad';
 import { ErrorApi } from '../../nucleo/error-api';
-import { rutaInterna } from '../../nucleo/navegacion';
+import { empiezaPorSegmento, rutaInterna } from '../../nucleo/navegacion';
 import { NAVEGADOR, RUTAS_BFF } from '../../nucleo/sesion';
 import { erroresClaveNueva } from '../../nucleo/validaciones';
 import { FORMULARIO_LUME } from '../../ui';
@@ -21,7 +21,7 @@ import { Turnstile } from './turnstile';
  */
 export function destinoSeguro(continuar: unknown): string {
   const ruta = rutaInterna(continuar);
-  return ruta && (ruta.startsWith('/oauth2/authorize') || ruta.startsWith('/bff/')) ? ruta : RUTAS_BFF.autorizacion;
+  return ruta && (empiezaPorSegmento(ruta, '/oauth2/authorize') || empiezaPorSegmento(ruta, '/bff')) ? ruta : RUTAS_BFF.autorizacion;
 }
 
 /**

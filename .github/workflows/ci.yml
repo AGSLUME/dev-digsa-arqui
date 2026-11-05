@@ -65,12 +65,14 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Auditoría de dependencias de producción (aviso)
         run: npm audit --omit=dev || true
-      - name: Cliente generado desde contratos/ (verifica el SHA-1 del generador)
+      - name: Cliente generado desde contratos/ (verifica el SHA-256 del generador)
         run: npm run api
       - name: Build
         run: npx ng build
       - name: Pruebas
         run: npx ng test --watch=false
+      - name: Pruebas del mock (Host local, control con cabecera, CSRF)
+        run: npm run test:mock
 
   e2e:
     name: E2E (Playwright · chromium, firefox, webkit)

@@ -131,6 +131,10 @@ describe('destinoSeguro (continuar nunca saca de LUME)', () => {
     expect(destinoSeguro('/bff/oauth2/authorization/lume')).toBe('/bff/oauth2/authorization/lume');
     // Otra ruta del mismo origen tampoco: continuar solo termina la autorización
     expect(destinoSeguro('/usuarios')).toBe(RUTAS_BFF.autorizacion);
+    expect(destinoSeguro('/oauth2/authorizeX')).toBe(RUTAS_BFF.autorizacion);
+    expect(destinoSeguro('/bffx/algo')).toBe(RUTAS_BFF.autorizacion);
+    expect(destinoSeguro('/oauth2/authorize/../..//evil.com')).toBe(RUTAS_BFF.autorizacion);
+    expect(destinoSeguro('/bff/..//evil.com')).toBe(RUTAS_BFF.autorizacion);
     for (const malo of ['https://otro.example/x', '//otro.example', '/\\otro.example', 'javascript:alert(1)', '', null, 3]) {
       expect(destinoSeguro(malo)).toBe(RUTAS_BFF.autorizacion);
     }

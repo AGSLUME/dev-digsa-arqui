@@ -1,6 +1,8 @@
 // Genera el cliente Angular desde contratos/ (ADR-007): typescript-angular de openapi-generator 7.26.0 (el mismo del pom), a
-// src/app/api/<servicio>/ (no se versiona). Antes verifica el SHA-1 del jar contra el que publica Maven Central (ADR-012):
-//   curl -s https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/7.26.0/openapi-generator-cli-7.26.0.jar.sha1
+// src/app/api/<servicio>/ (no se versiona). Antes verifica el SHA-256 del jar (ADR-012). Maven Central solo publica .sha1 y la firma
+// .asc de este artefacto; el SHA-256 fijado aquí es el del jar que pasó las dos (2026-11-05): SHA-1 igual al .sha1 de Central
+// (b96b148fcf482808037f68fbad99cb4d7e65d40b) y firma PGP válida de William Cheng, mantenedor de OpenAPI Generator (huella
+// AE81 EA0B D1BE 2997 053C C6C5 0D49 7348 00E3 AA0C). Cómo repetirlo está en frontend/README.md.
 // Uso: npm run api   (necesita Java 21 en el PATH; la CLI de npm baja el jar la primera vez)
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -8,7 +10,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const VERSION = '7.26.0';
-const SHA1 = 'b96b148fcf482808037f68fbad99cb4d7e65d40b';
+const SHA256 = '1760050094997b9cc790cc1350be095f15da8c08a996b184d3eadc4ccda5e35e';
 const SERVICIOS = ['seguridad'];
 
 const raiz = fileURLToPath(new URL('..', import.meta.url));
@@ -17,9 +19,9 @@ const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const opciones = { cwd: raiz, stdio: 'inherit', shell: process.platform === 'win32' };
 
 if (!existsSync(jar)) execFileSync(npx, ['openapi-generator-cli', 'version'], opciones);
-const sha1 = createHash('sha1').update(readFileSync(jar)).digest('hex');
-if (sha1 !== SHA1) {
-  console.error(`El jar del generador no es el publicado: SHA-1 ${sha1}, esperado ${SHA1}. Se borra.`);
+const sha256 = createHash('sha256').update(readFileSync(jar)).digest('hex');
+if (sha256 !== SHA256) {
+  console.error(`El jar del generador no es el verificado: SHA-256 ${sha256}, esperado ${SHA256}. Se borra.`);
   rmSync(jar);
   process.exit(1);
 }
