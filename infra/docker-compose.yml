@@ -75,8 +75,8 @@ services:
     restart: unless-stopped
 
   # --- Observabilidad básica (perfil opcional "obs") ---
-  # PENDIENTE DE APROBACIÓN DEL USUARIO: prom/prometheus y openzipkin/zipkin los publican los propios proyectos, pero en Docker Hub no
-  # figuran como "Docker Official Image" ni como editor verificado. No se descargan hasta que el usuario lo decida.
+  # prom/prometheus y openzipkin/zipkin: los publican los propios proyectos (no son "Docker Official Image" ni editor verificado);
+  # APROBADAS por el usuario el 2026-11-05, con etiqueta exacta y digest.
   prometheus:
     profiles: ["obs"]
     image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
