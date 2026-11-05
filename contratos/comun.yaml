@@ -1,0 +1,96 @@
+openapi: 3.1.0
+info:
+  title: LUME · componentes comunes
+  version: 1.0.0
+  description: |
+    Piezas que comparten todos los contratos de LUME (ADR-007). Se referencian con `$ref: './comun.yaml#/components/...'`.
+
+    **Errores.** Todo error es `application/problem+json` (RFC 7807) con las extensiones que ya leen las pantallas del monolito:
+    `mensaje` (igual a `detail`), `campo` (el campo del cuerpo al que se refiere un 422) y `motivo` (código estable para que la
+    interfaz decida qué hacer, p. ej. `sin_sesion`). El monolito respondía solo `{mensaje, campo?, motivo?}`; este formato es un
+    superconjunto compatible. Implementación: `librerias/comun` (`Problemas`).
+paths: {}
+components:
+  schemas:
+    Problema:
+      type: object
+      required: [type, title, status, detail, mensaje]
+      properties:
+        type:
+          type: string
+          description: Identifica el error (`urn:lume:error:<estado>`); no es una URL que haya que resolver.
+          examples: ['urn:lume:error:422']
+        title:
+          type: string
+          description: Frase del estado HTTP.
+        status:
+          type: integer
+          format: int32
+        detail:
+          type: string
+          description: Mensaje para el usuario, en español, igual al del monolito.
+        instance:
+          type: string
+        mensaje:
+          type: string
+          description: Igual a `detail`. Es el campo que leen las pantallas y los e2e.
+        campo:
+          type: string
+          description: Solo en algunos 422. Nombre del campo del cuerpo de la petición que la pantalla debe marcar.
+        motivo:
+          type: string
+          description: Código estable del caso (por ejemplo `sin_sesion`, `bloqueado`, `sesion_abierta`). Cada contrato documenta sus valores.
+      additionalProperties: true
+    Mensaje:
+      type: object
+      required: [mensaje]
+      properties:
+        mensaje:
+          type: string
+  responses:
+    NoAutenticado:
+      description: |
+        Sin sesión o sesión cerrada. El `motivo` dice por qué; la interfaz muestra `mensaje` en el ingreso. `sin_sesion` = «La sesión
+        expiró. Vuelva a iniciar sesión.»
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    SinPermiso:
+      description: «No tiene permiso para esta acción.»
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    PaginaExpirada:
+      description: CSRF ausente o inválido (lo aplica el gateway). «La página expiró. Recárguela e intente de nuevo.»
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    Validacion:
+      description: Datos no válidos (422). Lleva `mensaje` y, si aplica, `campo`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    FormatoInvalido:
+      description: «La petición no tiene el formato esperado.»
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    DemasiadasPeticiones:
+      description: Límite de tasa superado (429).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+  # CSRF: toda escritura que pasa por el gateway lleva la cabecera X-XSRF-TOKEN con el valor de la cookie XSRF-TOKEN (mismo contrato
+  # que la SPA del monolito). La aplica el gateway, no el servicio, así que no figura como parámetro de las operaciones.
+  securitySchemes:
+    sesionGateway:
+      type: apiKey
+      in: cookie
+      name: LUME_SESION
+      description: Cookie HttpOnly del BFF (ADR-003). El navegador nunca ve tokens; el gateway reenvía el access token al servicio.
