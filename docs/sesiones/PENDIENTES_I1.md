@@ -27,4 +27,4 @@ Salen de la revisión de código del esqueleto (agentes revisor-java + seguridad
 - Prometheus del gateway por un puerto de gestión interno (hoy cerrado en el público).
 - `server.forward-headers-strategy` del gateway y `LUME_PROXIES_CONFIABLES` acotados al ingress.
 - Análisis de dependencias Maven en el CI (ADR-012). En I1 solo corre `npm audit`; OWASP Dependency-Check necesita clave de NVD y queda para cuando el CI tenga secretos.
-- Imágenes `prom/prometheus` y `openzipkin/zipkin`: pendientes de aprobación del usuario (no son oficiales ni de editor verificado en Docker Hub).
+- ~~Imágenes `prom/prometheus` y `openzipkin/zipkin`~~: aprobadas por el usuario el 2026-11-05.

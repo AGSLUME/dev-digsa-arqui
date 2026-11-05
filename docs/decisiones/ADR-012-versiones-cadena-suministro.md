@@ -23,12 +23,12 @@ El monolito usa Java 21 y Spring Boot 3.5.16. La regla del proyecto exige fuente
 | Spring Security / Authorization Server | 7.1.2 |
 | Maven | 3.9.16 vía wrapper 3.3.4, SHA-256 verificado contra el SHA-512 oficial |
 | PostgreSQL / RabbitMQ / Redis | 16.15 / 4.3.7-management / 8.10.3, con digest |
-| Prometheus / Grafana / Zipkin (perfil `obs`) | v3.16.0 / 13.2.5 / 3.6.1, con digest; Prometheus y Zipkin pendientes de aprobación (no son oficiales ni de editor verificado en Docker Hub) |
+| Prometheus / Grafana / Zipkin (perfil `obs`) | v3.16.0 / 13.2.5 / 3.6.1, con digest; Prometheus y Zipkin aprobados por el usuario el 2026-11-05 (los publican sus proyectos; no son oficiales ni de editor verificado en Docker Hub) |
 | Angular / Node | 21.2 (CLI 21.2.29) / 24.19.0 |
 | Acciones de GitHub | checkout v7.0.1, setup-java v6.2.0, setup-node v7.1.0, fijadas por SHA |
 
 **Imágenes Docker**
-- Solo oficiales de Docker Hub (`postgres`, `rabbitmq`, `redis`, `eclipse-temurin`) o de editor verificado (`openzipkin/zipkin`, `prom/prometheus`, `grafana/grafana`).
+- Solo oficiales de Docker Hub (`postgres`, `rabbitmq`, `redis`, `eclipse-temurin`) o de editor verificado (`grafana/grafana`). Excepción aprobada por el usuario el 2026-11-05: `prom/prometheus` y `openzipkin/zipkin`, publicadas por sus propios proyectos.
 - Siempre con etiqueta exacta **y** digest: `postgres:16.x@sha256:...`. El digest se obtiene del registro oficial y queda escrito en el compose.
 
 **npm y herramientas**
