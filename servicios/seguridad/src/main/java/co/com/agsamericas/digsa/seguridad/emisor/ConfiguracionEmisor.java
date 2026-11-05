@@ -65,7 +65,7 @@ class ConfiguracionEmisor {
 
     @Bean
     @Order(1)
-    SecurityFilterChain cadenaEmisor(HttpSecurity http, RequestCache peticiones) throws Exception {
+    SecurityFilterChain cadenaEmisor(HttpSecurity http, RequestCache peticiones, java.time.Clock reloj) throws Exception {
         http
                 .oauth2AuthorizationServer((OAuth2AuthorizationServerConfigurer emisor) -> {
                     http.securityMatcher(emisor.getEndpointsMatcher());
@@ -75,6 +75,9 @@ class ConfiguracionEmisor {
                 })
                 .authorizeHttpRequests(a -> a.anyRequest().authenticated())
                 .requestCache(c -> c.requestCache(peticiones))
+                // B6: la sesión autenticada solo autoriza en los 60 s siguientes al código MFA
+                .addFilterAfter(new FiltroAutenticacionReciente(reloj),
+                        org.springframework.security.web.context.SecurityContextHolderFilter.class)
                 .exceptionHandling(e -> e.defaultAuthenticationEntryPointFor(
                         new LoginUrlAuthenticationEntryPoint(INGRESO), new MediaTypeRequestMatcher(MediaType.TEXT_HTML)))
                 .oauth2ResourceServer(r -> r.jwt(Customizer.withDefaults()));

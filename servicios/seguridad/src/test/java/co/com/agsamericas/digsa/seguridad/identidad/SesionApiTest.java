@@ -37,9 +37,6 @@ class SesionApiTest extends PruebaIntegracion {
         return cierres.abrir(u.id(), 10, "203.0.113.10").orElseThrow();
     }
 
-    private static RequestPostProcessor token(DatosPrueba.Ficticio u, UUID sid) {
-        return jwt().jwt(j -> j.claim("uid", u.id()).claim("usuario", u.usuario()).claim("sid", sid.toString()));
-    }
 
     private static RequestPostProcessor gateway() {
         return jwt().jwt(j -> j.subject("gateway").claim("scope", "seguridad:sesiones"))

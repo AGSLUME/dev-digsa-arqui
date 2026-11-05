@@ -123,6 +123,9 @@ spring:
               order: 1000
               predicates:
                 - Path=/**
+              filters:
+                # Los archivos de la SPA no necesitan cookies: LUME_SESION y LUME_IDP no salen hacia el servidor de Angular (revisión B-f)
+                - RemoveRequestHeader=Cookie
 
 management:
   endpoints:

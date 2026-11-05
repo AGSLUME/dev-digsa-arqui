@@ -33,3 +33,9 @@ Salen de la revisión de código del esqueleto (agentes revisor-java + seguridad
 - (Seguridad, S1) Rate limit de `/api/auth/**` en ventanas fijas de 1 min en Redis (por IP 60, por usuario 10, configurables). Si Redis cae, deja pasar (falla abierto) y quedan los topes de `seguridad` (bloqueo 5/15, 5 códigos/hora).
 - (Seguridad, S1) Tokens de `oauth2_authorization` (refresh y access) quedan en claro en la base, como guarda Spring Authorization Server: backups cifrados y acceso restringido al esquema `seguridad`.
 - (Seguridad, S1) Migración de datos: tras insertar los usuarios con sus id del monolito, avanzar la identidad (`setval`, comentado en V1 de seguridad). Cliente `gateway` fuera de local con secreto `{bcrypt}` (el `{noop}` solo se reconoce en local y pruebas).
+- (Seguridad, revisión de S1 por la integradora; para S2 o I9)
+  - B-a: `ClaimsToken` confía en el formato del principal (el sid). Exigir un `UsernamePasswordAuthenticationToken` con los dos factores, o quitar el servidor de recursos de la cadena del endpoint de autorización.
+  - B-b: un sid abierto sin canje (MFA correcto y nadie autoriza) bloquea con 409 durante los minutos de inactividad. Abrirlo al emitir el código, o cerrarlo si no hay canje en 60 s.
+  - B-c: detrás del ingress, el límite por IP se vuelve global si no se resuelve la IP real del cliente. Obligatorio antes del primer despliegue (ver M5 de S1).
+  - B-e: la cola de «olvidé mi contraseña» (100 puestos, 1 hilo) se puede llenar. Aplicar el tope por correo antes de encolar.
+  - La caché de 30 s del estado del sid en el gateway es por réplica y su mapa no se purga (entradas vencidas quedan en memoria). Usar una caché con tamaño y expiración, o Redis.

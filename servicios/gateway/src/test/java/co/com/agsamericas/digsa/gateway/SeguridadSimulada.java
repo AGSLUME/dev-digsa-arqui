@@ -67,7 +67,9 @@ final class SeguridadSimulada implements AutoCloseable {
                             cierres.add(req.param("sid") + " " + b);
                             return res.status(204).send().then();
                         }))
-                .route(req -> req.uri().startsWith("/api/"), this::eco))
+                .route(req -> req.uri().startsWith("/api/"), this::eco)
+                // Lo demás hace las veces del servidor de Angular (ruta frontend del gateway)
+                .route(req -> true, this::eco))
                 .bindNow();
     }
 

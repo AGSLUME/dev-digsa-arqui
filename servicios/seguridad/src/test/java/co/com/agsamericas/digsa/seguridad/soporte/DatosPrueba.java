@@ -40,6 +40,35 @@ public class DatosPrueba {
         return new Nuevo();
     }
 
+    private static final java.util.concurrent.atomic.AtomicLong IDS_COPIA = new java.util.concurrent.atomic.AtomicLong(9_000_000);
+
+    /** Un establecimiento ESM ficticio en la copia de visitas (D5: semilla solo en pruebas). @return su id */
+    public long puntoEsm(String nombre, String fuerza, boolean activo) {
+        long id = IDS_COPIA.incrementAndGet();
+        jdbc.sql("INSERT INTO puntos_copia (id, nombre, sigla, fuerza, unidad, activo) VALUES (:id, :n, :s, :f, 'ESM', :a)")
+                .param("id", id).param("n", nombre).param("s", "ESM" + id % 1000).param("f", fuerza).param("a", activo).update();
+        return id;
+    }
+
+    /** Una regional ficticia en la copia de visitas. @return su id */
+    public long regional(String nombre, boolean activo) {
+        long id = IDS_COPIA.incrementAndGet();
+        jdbc.sql("INSERT INTO regionales_copia (id, nombre, activo) VALUES (:id, :n, :a)").param("id", id).param("n", nombre)
+                .param("a", activo).update();
+        return id;
+    }
+
+    /** Abre una sesión de LUME para el usuario (como tras un ingreso completo). @return el sid */
+    public java.util.UUID abrirSesion(long usuarioId) {
+        java.util.UUID sid = java.util.UUID.randomUUID();
+        Instant ahora = reloj.instant();
+        jdbc.sql("UPDATE sesiones SET cerrada = :a, motivo = 'salida' WHERE usuario_id = :u AND cerrada IS NULL")
+                .param("a", ahora.atOffset(ZoneOffset.UTC)).param("u", usuarioId).update();
+        jdbc.sql("INSERT INTO sesiones (id, usuario_id, inicio, ultimo, ip) VALUES (:id, :u, :a, :a, '203.0.113.10')")
+                .param("id", sid).param("u", usuarioId).param("a", ahora.atOffset(ZoneOffset.UTC)).update();
+        return sid;
+    }
+
     /** Usuario creado. */
     public record Ficticio(long id, String usuario, String correo, String nombre) {
     }

@@ -88,14 +88,15 @@ public class CorreoSmtpProvisional implements CorreoSeguridad {
         }
     }
 
-    /** Registro y contenido se guardan 1 año (interventoría) y luego se borran, por lotes. */
+    /**
+     * Registro y contenido se guardan 1 año (interventoría) y luego se borran, por lotes. La aplicación no tiene DELETE sobre la tabla
+     * (V4): la función de la base solo borra lo que tiene más de 366 días según el reloj de la base.
+     */
     @Scheduled(cron = "${lume.correo.purga-cron:0 15 3 * * *}", zone = "America/Bogota")
     public void purgar() {
-        var limite = reloj.instant().minus(Duration.ofDays(366)).atOffset(ZoneOffset.UTC);
         int borrados;
         do {
-            borrados = jdbc.sql("DELETE FROM correos_registro WHERE id IN (SELECT id FROM correos_registro WHERE creado < :l LIMIT :n)")
-                    .param("l", limite).param("n", LOTE_PURGA).update();
+            borrados = jdbc.sql("SELECT correos_registro_purgar(:n)").param("n", LOTE_PURGA).query(Integer.class).single();
         } while (borrados == LOTE_PURGA);
     }
 

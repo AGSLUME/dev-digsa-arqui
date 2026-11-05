@@ -51,6 +51,20 @@ public abstract class PruebaIntegracion {
         datos = new DatosPrueba(jdbc, reloj);
     }
 
+    /**
+     * El token (como lo reenvía el gateway) de un usuario con sesión abierta: {@code uid}, {@code usuario} y {@code sid}. Las API de
+     * administración revisan perfiles, pantallas y sesión en la base (como el FiltroSesion del monolito), no en el token.
+     */
+    protected static org.springframework.test.web.servlet.request.RequestPostProcessor token(DatosPrueba.Ficticio u, java.util.UUID sid) {
+        return org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt()
+                .jwt(j -> j.claim("uid", u.id()).claim("usuario", u.usuario()).claim("sid", sid.toString()));
+    }
+
+    /** Un Administrador nuevo con sesión abierta; su token con {@link #token}. */
+    protected DatosPrueba.Ficticio administrador() {
+        return datos.usuario(co.com.agsamericas.digsa.reglas.Perfil.ADMINISTRADOR);
+    }
+
     /** Un navegador nuevo (sin cookies) frente a {@code seguridad}. */
     protected Navegador navegador() {
         return new Navegador(mvc);

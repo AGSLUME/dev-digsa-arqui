@@ -56,6 +56,10 @@ public class ServicioIngreso {
     static final String MFA_DESDE = "lume.ingreso.mfa.desde";
     static final String CAMBIO_USUARIO = "lume.ingreso.cambio.usuario";
     static final String CAMBIO_DESDE = "lume.ingreso.cambio.desde";
+    /** Hora (epoch ms) del ingreso completo: el emisor solo autoriza en los 60 s siguientes (B6). */
+    public static final String AUTENTICADO = "lume.ingreso.autenticado";
+    /** Atributo donde HttpSessionRequestCache guarda la autorización pendiente. */
+    static final String PETICION_GUARDADA = "SPRING_SECURITY_SAVED_REQUEST";
 
     private static final String VERIFICACION_VENCIDA = "La verificación venció. Ingrese de nuevo con su usuario y contraseña.";
     private static final String RUTA_AUTORIZAR = "/oauth2/authorize";
@@ -163,11 +167,7 @@ public class ServicioIngreso {
         Usuario u = encontrado.get();
         usuarios.reiniciarIntentos(u.id(), ahora);
         verificarSesionLibre(u, ahora, ip);
-        HttpSession s = req.getSession(true);
-        if (!s.isNew()) {
-            req.changeSessionId(); // id nuevo tras la contraseña (conserva la autorización guardada): fijación de sesión
-        }
-        limpiarIngreso(s);
+        HttpSession s = sesionNueva(req);
         if ((u.claveInicial() && u.debeCambiarClave()) || u.claveVencida(ahora)) {
             // Contraseña inicial del administrador o vencida: se cambia aquí mismo, sin ir al correo (prueba 2 y condición 12)
             s.setAttribute(CAMBIO_USUARIO, u.id());
@@ -179,7 +179,7 @@ public class ServicioIngreso {
         }
         if (u.cambioPendiente(ahora)) {
             String m = !u.claveDefinida() ? "Es su primer ingreso: debe definir su contraseña." : "Debe actualizar su contraseña.";
-            CorreoSeguridad.Resultado e = claves.enviarEnlace(u, "Defina su contraseña", m, false);
+            CorreoSeguridad.Resultado e = claves.enviarEnlaceConTope(u, "Defina su contraseña", m);
             return new Paso("definir_clave", m + (e.ok() ? " Le enviamos un enlace a su correo." : " No se pudo enviar el correo: avise al administrador."),
                     Correos.enmascarar(u.correo()));
         }
@@ -248,7 +248,8 @@ public class ServicioIngreso {
             if (anterior != null) {
                 anterior.invalidate();
             }
-            req.getSession(true);
+            // La hora de la autenticación: la autorización solo se acepta en los 60 s siguientes (B6; FiltroAutenticacionReciente)
+            req.getSession(true).setAttribute(AUTENTICADO, ahora.toEpochMilli());
             SecurityContext ctx = SecurityContextHolder.createEmptyContext();
             // Dos factores con su hora (contraseña y código de un solo uso por correo): el emisor deriva de ellos el auth_time del id token
             // ArrayList (no List.of): la autorización guardada se lee con la lista de tipos permitidos de Jackson del emisor
@@ -347,18 +348,31 @@ public class ServicioIngreso {
     private static Optional<Long> vigente(HttpSession s, String atributoUsuario, String atributoDesde, Instant ahora) {
         Object id = s == null ? null : s.getAttribute(atributoUsuario);
         Object desde = s == null ? null : s.getAttribute(atributoDesde);
-        if (!(id instanceof Long uid) || !(desde instanceof Long d)
-                || Instant.ofEpochMilli(d).plusSeconds(Mfa.MINUTOS_VIGENCIA * 60L).isBefore(ahora)) {
+        // Number y no Long: la sesión se guarda en JSON (M3) y un número pequeño vuelve como Integer
+        if (!(id instanceof Number uid) || !(desde instanceof Number d)
+                || Instant.ofEpochMilli(d.longValue()).plusSeconds(Mfa.MINUTOS_VIGENCIA * 60L).isBefore(ahora)) {
             return Optional.empty();
         }
-        return Optional.of(uid);
+        return Optional.of(uid.longValue());
     }
 
-    private static void limpiarIngreso(HttpSession s) {
-        s.removeAttribute(MFA_USUARIO);
-        s.removeAttribute(MFA_DESDE);
-        s.removeAttribute(CAMBIO_USUARIO);
-        s.removeAttribute(CAMBIO_DESDE);
+    /**
+     * Sesión del emisor NUEVA para cada paso 1 (revisión de la integradora, M1/B6): se descarta la anterior entera (su contexto de
+     * seguridad, el ingreso a medias de otra persona) y solo se conserva la autorización OIDC guardada, que es la del navegador. Además
+     * cambia el id (fijación de sesión).
+     */
+    private static HttpSession sesionNueva(HttpServletRequest req) {
+        HttpSession anterior = req.getSession(false);
+        Object guardada = anterior == null ? null : anterior.getAttribute(PETICION_GUARDADA);
+        if (anterior != null) {
+            anterior.invalidate();
+        }
+        SecurityContextHolder.clearContext();
+        HttpSession s = req.getSession(true);
+        if (guardada != null) {
+            s.setAttribute(PETICION_GUARDADA, guardada);
+        }
+        return s;
     }
 
     /**

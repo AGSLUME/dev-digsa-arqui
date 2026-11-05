@@ -51,17 +51,23 @@ class EsquemaTest extends PruebaIntegracion {
     }
 
     @Test
-    void soloHayUnaClaveDeFirmaVigente() {
-        // Puede existir ya la vigente que creó el almacén de claves al emitir un token en otra prueba del mismo contexto
-        boolean puse = jdbc.sql("SELECT count(*) FROM jwk WHERE retirada IS NULL").query(Long.class).single() == 0;
-        if (puse) {
-            jdbc.sql("INSERT INTO jwk (kid, publica, privada_cifrada, creada) VALUES ('k1', '{}', '\\x00', now())").update();
-        }
-        assertThatThrownBy(() -> jdbc.sql("INSERT INTO jwk (kid, publica, privada_cifrada, creada) VALUES ('k2', '{}', '\\x00', now())")
-                .update()).isInstanceOf(DataIntegrityViolationException.class);
-        if (puse) {
-            jdbc.sql("DELETE FROM jwk WHERE kid = 'k1'").update();
-        }
+    void laAplicacionNoEscribeClavesDeFirmaNiBorraElRegistroDeCorreos() {
+        // M2 y B-d de la revisión de la integradora: solo por las funciones de V4
+        assertThatThrownBy(() -> jdbc.sql("INSERT INTO jwk (kid, publica, privada_cifrada, creada) VALUES ('k1', '{}', '\\x00', now())")
+                .update()).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThatThrownBy(() -> jdbc.sql("UPDATE jwk SET retirada = now()").update()).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThatThrownBy(() -> jdbc.sql("DELETE FROM jwk").update()).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThatThrownBy(() -> jdbc.sql("DELETE FROM correos_registro").update()).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        // La purga por función solo quita lo de más de 366 días
+        jdbc.sql("""
+                INSERT INTO correos_registro (creado, plantilla, destinatario, asunto, cuerpo, estado)
+                VALUES (now() - interval '400 days', 'mfa_codigo', 'viejo@seguridad.prueba.local', 'x', 'x', 'enviado'),
+                       (now() - interval '300 days', 'mfa_codigo', 'reciente@seguridad.prueba.local', 'x', 'x', 'enviado')""").update();
+        jdbc.sql("SELECT correos_registro_purgar(1000)").query(Integer.class).single();
+        assertThat(jdbc.sql("SELECT count(*) FROM correos_registro WHERE destinatario = 'viejo@seguridad.prueba.local'")
+                .query(Long.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT count(*) FROM correos_registro WHERE destinatario = 'reciente@seguridad.prueba.local'")
+                .query(Long.class).single()).isEqualTo(1L);
     }
 
     @Test

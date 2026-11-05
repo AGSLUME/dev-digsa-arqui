@@ -139,13 +139,59 @@ class TokensTest extends PruebaIntegracion {
     void laRotacionPublicaLaClaveRetirada() throws Exception {
         var u = datos.usuario();
         String antes = encabezado(ingresarYCanjear(u).acceso()).get("kid").asString();
-        jdbc.sql("UPDATE jwk SET creada = creada - interval '31 days' WHERE kid = :k").param("k", antes).update();
+        // La aplicación no escribe en jwk (V4): la clave vigente «envejece» adelantando el reloj
+        envejecerVigente();
         almacen.rotarSiHaceFalta();
         var otro = datos.usuario();
         String despues = encabezado(ingresarYCanjear(otro).acceso()).get("kid").asString();
         assertThat(despues).isNotEqualTo(antes);
         String jwks = mvc.perform(get("/oauth2/jwks")).andReturn().getResponse().getContentAsString();
         assertThat(jwks).contains(antes, despues);
+    }
+
+    @Test
+    @DisplayName("M3: la sesión del emisor se guarda en JSON (sin serialización de Java, que leída podría ejecutar código)")
+    void laSesionDelEmisorSeGuardaEnJson() throws Exception {
+        var u = datos.usuario();
+        Navegador n = navegador();
+        n.navegar(AUTORIZAR).andExpect(status().isFound());
+        n.post("/api/auth/ingreso", Map.of("usuario", u.usuario(), "clave", DatosPrueba.CLAVE)).andExpect(status().isOk());
+        java.util.List<byte[]> atributos = jdbc.sql("SELECT attribute_bytes FROM spring_session_attributes").query(byte[].class).list();
+        assertThat(atributos).isNotEmpty();
+        assertThat(atributos).allSatisfy(b -> {
+            assertThat(b.length > 1 && (b[0] & 0xFF) == 0xAC && (b[1] & 0xFF) == 0xED).as("marca de serialización de Java").isFalse();
+            assertThat(new String(b, StandardCharsets.UTF_8).strip()).matches("(?s)^[\\[{\"0-9-].*");
+        });
+    }
+
+    @Test
+    @DisplayName("M2: una clave plantada en jwk (sin la clave de cifrado del entorno) ni se publica ni firma")
+    void unaClavePlantadaNoSePublica() throws Exception {
+        var u = datos.usuario();
+        String legitima = encabezado(ingresarYCanjear(u).acceso()).get("kid").asString();
+        // El atacante (con la credencial de la aplicación) usa la función de rotación con su propia pública y un cifrado inventado
+        var ajena = new com.nimbusds.jose.jwk.gen.RSAKeyGenerator(2048).keyID("plantada").generate();
+        var ahora = reloj.instant().atOffset(java.time.ZoneOffset.UTC);
+        jdbc.sql("SELECT jwk_rotar('plantada', :pub, :priv, :a, :h)").param("pub", ajena.toPublicJWK().toJSONString())
+                .param("priv", new byte[64]).param("a", ahora).param("h", ahora.plusHours(24)).query(Object.class).optional();
+        AlmacenJwk otro = new AlmacenJwk(jdbc, contexto.getBean(org.springframework.transaction.support.TransactionTemplate.class), reloj,
+                "cHJ1ZWJhLXNvbG8tcHJ1ZWJhLXNvbG8tcHJ1ZWJhLTE=", 30);
+        var publicadas = otro.claves();
+        assertThat(publicadas).extracting(com.nimbusds.jose.jwk.JWK::getKeyID).doesNotContain("plantada").contains(legitima);
+        assertThat(publicadas).noneMatch(com.nimbusds.jose.jwk.JWK::isPrivate); // la vigente es la plantada: nadie firma (falla cerrado)
+        // Deja el almacén como estaba para las demás pruebas: una clave vigente legítima
+        envejecerVigente();
+        almacen.rotarSiHaceFalta();
+    }
+
+    /** Adelanta el reloj hasta 31 días después de la creación de la clave vigente (rotación sin escribir en jwk). */
+    private void envejecerVigente() {
+        java.time.Instant creada = jdbc.sql("SELECT creada FROM jwk WHERE retirada IS NULL").query(java.sql.Timestamp.class).single()
+                .toInstant();
+        java.time.Duration falta = java.time.Duration.between(reloj.instant(), creada.plus(java.time.Duration.ofDays(31)));
+        if (!falta.isNegative()) {
+            reloj.avanzar(falta);
+        }
     }
 
     @Test
@@ -203,6 +249,48 @@ class TokensTest extends PruebaIntegracion {
         int antes = correos.a(u.correo()).size();
         ingresarYCanjear(u, n);
         assertThat(correos.a(u.correo())).hasSize(antes + 1);
+    }
+
+    @Test
+    @DisplayName("B6/M1: MFA correcto y nadie autoriza en 60 s (pestaña cerrada) → la autorización vuelve a /ingreso, sin código")
+    void laSesionAutenticadaVenceSiNoSeAutorizaEnSesentaSegundos() throws Exception {
+        var u = datos.usuario();
+        Navegador n = navegador();
+        n.navegar(AUTORIZAR).andExpect(status().isFound());
+        n.post("/api/auth/ingreso", Map.of("usuario", u.usuario(), "clave", DatosPrueba.CLAVE)).andExpect(status().isOk());
+        String continuar = Navegador.campo(n.post("/api/auth/codigo", Map.of("codigo", correos.ultimoCodigo(u.correo())))
+                .andExpect(status().isOk()), "continuar");
+        reloj.avanzar(java.time.Duration.ofSeconds(61));
+        String ubicacion = n.navegar(continuar).andExpect(status().isFound()).andReturn().getResponse().getRedirectedUrl();
+        assertThat(ubicacion).endsWith("/ingreso").doesNotContain("code=");
+    }
+
+    @Test
+    @DisplayName("B6/M1: A supera el MFA y no autoriza; B ingresa en el mismo navegador → el contexto de A desaparece; el código es de B")
+    void unIngresoNuevoDescartaElContextoAnterior() throws Exception {
+        var a = datos.usuario();
+        var b = datos.usuario();
+        Navegador n = navegador();
+        n.navegar(AUTORIZAR).andExpect(status().isFound());
+        n.post("/api/auth/ingreso", Map.of("usuario", a.usuario(), "clave", DatosPrueba.CLAVE)).andExpect(status().isOk());
+        String continuarA = Navegador.campo(n.post("/api/auth/codigo", Map.of("codigo", correos.ultimoCodigo(a.correo())))
+                .andExpect(status().isOk()), "continuar");
+        // B empieza su ingreso en el mismo navegador: la sesión del emisor de A se descarta
+        n.post("/api/auth/ingreso", Map.of("usuario", b.usuario(), "clave", DatosPrueba.CLAVE)).andExpect(status().isOk());
+        String sinCodigo = n.navegar(continuarA).andExpect(status().isFound()).andReturn().getResponse().getRedirectedUrl();
+        assertThat(sinCodigo).endsWith("/ingreso").doesNotContain("code=");
+        // B termina su ingreso: el código que se emite es de B
+        n.post("/api/auth/ingreso", Map.of("usuario", b.usuario(), "clave", DatosPrueba.CLAVE)).andExpect(status().isOk());
+        String continuarB = Navegador.campo(n.post("/api/auth/codigo", Map.of("codigo", correos.ultimoCodigo(b.correo())))
+                .andExpect(status().isOk()), "continuar");
+        String conCodigo = n.navegar(continuarB).andExpect(status().isFound()).andReturn().getResponse().getRedirectedUrl();
+        var q = UriComponentsBuilder.fromUri(URI.create(conCodigo)).build().getQueryParams();
+        String cuerpo = mvc.perform(post("/oauth2/token").header(HttpHeaders.AUTHORIZATION, BASICO)
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .content("grant_type=authorization_code&code=" + q.getFirst("code") + "&redirect_uri=" + RETORNO
+                                + "&code_verifier=" + VERIFICADOR))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(claims(JSON.readTree(cuerpo).get("access_token").asString()).get("sub")).isEqualTo(String.valueOf(b.id()));
     }
 
     // ---------- auxiliares ----------

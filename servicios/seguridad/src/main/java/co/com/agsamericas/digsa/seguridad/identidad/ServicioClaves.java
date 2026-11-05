@@ -78,6 +78,23 @@ public class ServicioClaves {
         return correo.enviar(PlantillasCorreo.enlaceClave(u.id(), u.correo(), asunto, u.nombre(), motivo, enlace, Claves.MINUTOS_ENLACE));
     }
 
+    /**
+     * Como {@link #enviarEnlace}, pero sin reenviar si ya salió uno en los últimos {@link #MINUTOS_ENTRE_ENLACES} minutos (revisión B-f: el
+     * paso 1 de un usuario que debe definir su contraseña no puede servir para inundar su correo). Responde «enviado» porque el enlace
+     * vigente ya está en su correo.
+     */
+    public CorreoSeguridad.Resultado enviarEnlaceConTope(Usuario u, String asunto, String motivo) {
+        if (enviadoHacePoco(u, reloj.instant())) {
+            return CorreoSeguridad.Resultado.bien();
+        }
+        return enviarEnlace(u, asunto, motivo, false);
+    }
+
+    private static boolean enviadoHacePoco(Usuario u, Instant ahora) {
+        Instant enviado = u.tokenVence() == null ? null : u.tokenVence().minus(Duration.ofMinutes(Claves.MINUTOS_ENLACE));
+        return enviado != null && enviado.plus(Duration.ofMinutes(MINUTOS_ENTRE_ENLACES)).isAfter(ahora);
+    }
+
     /** Usuario del enlace, si sigue vigente. */
     public Optional<Usuario> usuarioDelEnlace(String token) {
         if (token == null || !token.matches("^[a-f0-9]{64}$")) {

@@ -534,7 +534,7 @@ paths:
       operationId: crearUsuario
       summary: Crear un usuario
       description: |
-        Sin clave inicial: «Usuario creado. Se le envía el enlace para definir su contraseña.» (o, si el correo no sale, 201 con
+        Sin clave inicial: «Usuario creado. Se le envió el enlace para definir su contraseña.» (o, si el correo no sale, 201 con
         `correoOk=false` y «Usuario creado, pero NO se pudo enviar el correo (…). Use «Restablecer contraseña» cuando el correo funcione.»).
         Con clave inicial: «Usuario creado con contraseña inicial. Entréguela al usuario por un canal seguro: deberá cambiarla en su primer
         ingreso.»

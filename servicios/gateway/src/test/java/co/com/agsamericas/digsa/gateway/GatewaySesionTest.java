@@ -64,6 +64,7 @@ class GatewaySesionTest {
         r.add("LUME_SEGURIDAD_URL", SEGURIDAD::url);
         // Las APIs de servicio también van al doble (eco con la cabecera Authorization recibida)
         r.add("LUME_HOLA_URL", SEGURIDAD::url);
+        r.add("LUME_FRONTEND_URL", SEGURIDAD::url);
     }
 
     @AfterAll
@@ -198,6 +199,17 @@ class GatewaySesionTest {
         post("/api/auth/codigo", "{\"codigo\":\"999999\"}").exchange().expectStatus().isEqualTo(429);
         cookies.put("LUME_IDP", "otra-sesion-ficticia");
         post("/api/auth/codigo", "{\"codigo\":\"999999\"}").exchange().expectStatus().isOk();
+    }
+
+    @Test
+    @DisplayName("B-f: las cookies (LUME_SESION, LUME_IDP) no viajan al servidor de Angular")
+    void lasCookiesNoVanAlFrontend() {
+        cookies.put("LUME_SESION", "no-debe-salir");
+        cookies.put("LUME_IDP", "tampoco");
+        get("/una-pantalla-de-la-spa").exchange().expectStatus().isOk();
+        Map<String, String> recibida = SEGURIDAD.recibidas.getLast();
+        assertThat(recibida.get("ruta")).isEqualTo("/una-pantalla-de-la-spa");
+        assertThat(recibida.get("cookie")).isEmpty();
     }
 
     @Test

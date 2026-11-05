@@ -14,10 +14,11 @@ import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.SecureRandom;
+import java.security.interfaces.RSAPrivateCrtKey;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.PKCS8EncodedKeySpec;
-import java.text.ParseException;
+import java.security.spec.RSAPublicKeySpec;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -107,40 +108,53 @@ public class AlmacenJwk implements JWKSource<SecurityContext> {
             if (vigente.isPresent() && ((Instant) vigente.get()[1]).plus(rotarCada).isAfter(ahora)) {
                 return;
             }
-            vigente.ifPresent(v -> jdbc.sql("UPDATE jwk SET retirada = :a, publicar_hasta = :p WHERE kid = :k")
-                    .param("a", ahora.atOffset(ZoneOffset.UTC)).param("p", ahora.plus(PUBLICAR_RETIRADA).atOffset(ZoneOffset.UTC))
-                    .param("k", v[0]).update());
             RSAKey nueva = generar();
-            jdbc.sql("INSERT INTO jwk (kid, publica, privada_cifrada, creada) VALUES (:k, :pub, :priv, :c)")
+            // La aplicación no escribe en jwk (V4): la función retira la vigente, inserta la nueva y borra las retiradas vencidas
+            jdbc.sql("SELECT jwk_rotar(:k, :pub, :priv, :ahora, :hasta)")
                     .param("k", nueva.getKeyID()).param("pub", nueva.toPublicJWK().toJSONString())
-                    .param("priv", cifrar(privada(nueva).getEncoded())).param("c", ahora.atOffset(ZoneOffset.UTC)).update();
-            jdbc.sql("DELETE FROM jwk WHERE retirada IS NOT NULL AND publicar_hasta < :a").param("a", ahora.atOffset(ZoneOffset.UTC)).update();
+                    .param("priv", cifrar(nueva.getKeyID(), privada(nueva).getEncoded())).param("ahora", ahora.atOffset(ZoneOffset.UTC))
+                    .param("hasta", ahora.plus(PUBLICAR_RETIRADA).atOffset(ZoneOffset.UTC)).query(Object.class).optional();
             LOG.info("[jwk] Clave de firma nueva {}{}", nueva.getKeyID(), vigente.map(v -> " (retirada " + v[0] + ")").orElse(""));
         });
         cargadas = null;
     }
 
+    /**
+     * Las claves a publicar (y la vigente, con su privada para firmar). La pública NUNCA se lee de la columna {@code publica}: se deriva de
+     * la privada descifrada con la clave del entorno y el {@code kid} como dato autenticado (revisión de la integradora, M2). Una fila que no
+     * descifra (plantada sin la clave de cifrado, o con el kid cambiado) se ignora y queda en el log; si es la vigente, el emisor no tiene con
+     * qué firmar y no emite tokens (falla cerrado).
+     */
     private List<JWK> leer(Instant ahora) {
         List<JWK> r = new ArrayList<>();
-        jdbc.sql("""
-                SELECT kid, publica, privada_cifrada, retirada FROM jwk
+        record Fila(String kid, byte[] privada, boolean vigente) {
+        }
+        List<Fila> filas = jdbc.sql("""
+                SELECT kid, privada_cifrada, retirada IS NULL AS vigente FROM jwk
                 WHERE retirada IS NULL OR publicar_hasta >= :a ORDER BY (retirada IS NULL) DESC, creada DESC""")
                 .param("a", ahora.atOffset(ZoneOffset.UTC))
-                .query((rs, n) -> {
-                    try {
-                        RSAKey publica = RSAKey.parse(rs.getString("publica"));
-                        if (rs.getTimestamp("retirada") != null) {
-                            return publica; // solo verifica: la privada de una retirada no se descifra
-                        }
-                        RSAPrivateKey priv = (RSAPrivateKey) KeyFactory.getInstance("RSA")
-                                .generatePrivate(new PKCS8EncodedKeySpec(descifrar(rs.getBytes("privada_cifrada"))));
-                        return new RSAKey.Builder(publica).privateKey(priv).build();
-                    } catch (ParseException | GeneralSecurityException e) {
-                        throw new IllegalStateException("[jwk] No se pudo leer la clave " + rs.getString("kid")
-                                + " (¿cambió lume.jwk.clave-cifrado?)", e);
-                    }
-                }).list().forEach(r::add);
+                .query((rs, n) -> new Fila(rs.getString("kid"), rs.getBytes("privada_cifrada"), rs.getBoolean("vigente"))).list();
+        for (Fila f : filas) {
+            RSAKey clave;
+            try {
+                clave = desdePrivada(f.kid(), descifrar(f.kid(), f.privada()));
+            } catch (GeneralSecurityException | RuntimeException e) {
+                // Ni se publica ni firma. Si era la vigente, el emisor queda sin clave para firmar y no emite tokens (falla cerrado)
+                LOG.error("[jwk] Clave {}{} ignorada: no descifra con la clave del entorno (¿cambió lume.jwk.clave-cifrado o la fila no es "
+                        + "legítima?)", f.kid(), f.vigente() ? " (VIGENTE)" : "");
+                continue;
+            }
+            r.add(f.vigente() ? clave : clave.toPublicJWK());
+        }
         return List.copyOf(r);
+    }
+
+    /** La clave RSA completa a partir de la privada PKCS#8: la pública sale del módulo y el exponente público de la privada (CRT). */
+    private static RSAKey desdePrivada(String kid, byte[] pkcs8) throws GeneralSecurityException {
+        KeyFactory rsa = KeyFactory.getInstance("RSA");
+        RSAPrivateCrtKey priv = (RSAPrivateCrtKey) rsa.generatePrivate(new PKCS8EncodedKeySpec(pkcs8));
+        RSAPublicKey pub = (RSAPublicKey) rsa.generatePublic(new RSAPublicKeySpec(priv.getModulus(), priv.getPublicExponent()));
+        return new RSAKey.Builder(pub).privateKey(priv).keyID(kid).keyUse(KeyUse.SIGNATURE).algorithm(JWSAlgorithm.RS256).build();
     }
 
     private RSAKey generar() {
@@ -163,12 +177,14 @@ public class AlmacenJwk implements JWKSource<SecurityContext> {
         }
     }
 
-    private byte[] cifrar(byte[] claro) {
+    /** AES-256-GCM con el {@code kid} como dato autenticado (AAD): la privada cifrada no se puede mover a otro kid. */
+    private byte[] cifrar(String kid, byte[] claro) {
         try {
             byte[] iv = new byte[IV];
             azar.nextBytes(iv);
             Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
             c.init(Cipher.ENCRYPT_MODE, cifrado, new GCMParameterSpec(ETIQUETA_BITS, iv));
+            c.updateAAD(kid.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             byte[] cuerpo = c.doFinal(claro);
             return ByteBuffer.allocate(IV + cuerpo.length).put(iv).put(cuerpo).array();
         } catch (GeneralSecurityException e) {
@@ -176,9 +192,13 @@ public class AlmacenJwk implements JWKSource<SecurityContext> {
         }
     }
 
-    private byte[] descifrar(byte[] guardado) throws GeneralSecurityException {
+    private byte[] descifrar(String kid, byte[] guardado) throws GeneralSecurityException {
+        if (guardado == null || guardado.length <= IV) {
+            throw new GeneralSecurityException("cifrado vacío");
+        }
         Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
         c.init(Cipher.DECRYPT_MODE, cifrado, new GCMParameterSpec(ETIQUETA_BITS, guardado, 0, IV));
+        c.updateAAD(kid.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         return c.doFinal(guardado, IV, guardado.length - IV);
     }
 

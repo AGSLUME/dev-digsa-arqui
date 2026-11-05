@@ -390,6 +390,19 @@ class IngresoApiTest extends PruebaIntegracion {
     }
 
     @Test
+    @DisplayName("Revisión B-f: repetir el paso 1 no reenvía el enlace antes de 5 minutos (como «olvidé mi contraseña»)")
+    void elPasoUnoNoReenviaElEnlaceAntesDeCincoMinutos() throws Exception {
+        var u = datos.nuevo().sinClaveDefinida().crear();
+        for (int i = 0; i < 3; i++) {
+            paso1(navegador(), u.usuario(), DatosPrueba.CLAVE).andExpect(status().isOk()).andExpect(jsonPath("$.paso").value("definir_clave"));
+        }
+        assertThat(correos.a(u.correo())).hasSize(1);
+        reloj.avanzar(java.time.Duration.ofMinutes(6));
+        paso1(navegador(), u.usuario(), DatosPrueba.CLAVE).andExpect(status().isOk());
+        assertThat(correos.a(u.correo())).hasSize(2);
+    }
+
+    @Test
     @DisplayName("contrato: cambio exigido por el administrador responde definir_clave «Debe actualizar su contraseña.» con enlace")
     void cambioExigidoPorElAdministradorEnviaEnlace() throws Exception {
         var u = datos.nuevo().debeCambiarClave().crear();
