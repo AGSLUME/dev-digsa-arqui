@@ -43,8 +43,8 @@ export type Errores = Record<string, string | null | undefined>;
 export interface OpcionesValidacion {
   /** Nombre visible de cada campo para el resumen («Teléfono»); sin etiqueta se usa el nombre del campo. */
   etiquetas?: Record<string, string>;
-  /** Campo del servidor (nombre en el cuerpo de la petición) → campo del formulario, cuando difieren. */
-  campos?: Record<string, string>;
+  /** Campo del servidor (nombre en el cuerpo de la petición) → campo del formulario, cuando difieren; una función si depende del paso. */
+  campos?: Record<string, string> | (() => Record<string, string>);
   /** data-testid del resumen; cada pantalla conserva el que ya usan sus pruebas (p. ej. «error-ingreso»). */
   testid?: string;
 }
@@ -122,7 +122,8 @@ export class Validacion {
   /** Error de una petición: el mensaje va al resumen y, si el servidor dice el campo (`campo` del 422), el campo queda marcado. */
   errorServidor(e: unknown, texto: string): void {
     const delServidor = e instanceof ErrorApi ? (e.campo ?? null) : null;
-    const { etiquetas, campos } = this.opciones;
+    const { etiquetas } = this.opciones;
+    const campos = typeof this.opciones.campos === 'function' ? this.opciones.campos() : this.opciones.campos;
     const campo = delServidor === null ? null : (campos[delServidor] ?? delServidor);
     // Solo se marca un campo que el formulario conoce
     const conocido = campo !== null && campo in etiquetas ? campo : null;

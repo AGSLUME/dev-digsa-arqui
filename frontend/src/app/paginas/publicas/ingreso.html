@@ -1,0 +1,74 @@
+<main class="lume-publica">
+  <div #tarjeta class="lume-card lume-publica__tarjeta lume-pila">
+    <!-- Pantalla pública (sin la barra de la aplicación): el interruptor del sonido de las alertas va arriba a la derecha -->
+    <div class="lume-publica__titulo">
+      <h1 class="lume-h2">Interventoría Integral DIGSA</h1>
+      <lume-interruptor-sonido />
+    </div>
+    <p class="lume-apagado lume-texto-pequeno">Sistema de información de interventoría · cuentas médicas</p>
+
+    @if (aviso(); as motivo) {
+      <lume-alerta color="yellow" data-testid="motivo-cierre">{{ motivo }}</lume-alerta>
+    }
+    <lume-resumen-errores [validacion]="v" />
+
+    @let p = paso();
+    @if (p && p.paso === 'definir_clave') {
+      <lume-alerta color="blue">{{ p.mensaje }}</lume-alerta>
+    }
+
+    @if (p && p.paso === 'cambiar_clave') {
+      <form class="lume-pila" [lumeValidacion]="v" novalidate (submit)="$event.preventDefault(); cambiarClave()">
+        <lume-alerta color="blue">{{ p.mensaje }}</lume-alerta>
+        <p class="lume-apagado lume-texto-pequeno">
+          Mínimo 12 caracteres, sin tildes ni ñ. Después le enviaremos un código a <strong>{{ p.correo }}</strong>.
+        </p>
+        <lume-campo etiqueta="Contraseña nueva" obligatorio clave [error]="v.error('nueva')">
+          <input lumeEntrada type="password" autocomplete="new-password" maxlength="64" [value]="nueva()" (input)="escribir('nueva', $event)" />
+        </lume-campo>
+        <lume-campo etiqueta="Confirme la contraseña nueva" obligatorio clave [error]="v.error('confirmacion')">
+          <input
+            lumeEntrada
+            type="password"
+            autocomplete="new-password"
+            maxlength="64"
+            [value]="confirmacion()"
+            (input)="escribir('confirmacion', $event)"
+          />
+        </lume-campo>
+        <button lumeBoton type="submit" [cargando]="enviando()">Cambiar contraseña y continuar</button>
+      </form>
+    } @else if (p && p.paso === 'codigo') {
+      <form class="lume-pila" [lumeValidacion]="v" novalidate (submit)="$event.preventDefault(); verificar()">
+        <p id="codigo-enviado" class="lume-texto-pequeno">
+          {{ p.mensaje }} Lo enviamos a <strong>{{ p.correo }}</strong>. Vence en 15 minutos.
+        </p>
+        <lume-codigo-verificacion data-testid="codigo" [valor]="codigo()" (valorChange)="alCambiarCodigo($event)" [error]="errorCodigo()" idError="codigo-error" describe="codigo-enviado" />
+        <!-- Las casillas solo se marcan: el mensaje va debajo, unido a ellas con aria-describedby -->
+        @if (errorCodigo(); as e) {
+          @if (e !== true) {
+            <p id="codigo-error" class="lume-campo__error lume-codigo__error">{{ e }}</p>
+          }
+        }
+        <button lumeBoton type="submit" [cargando]="enviando()">Verificar e ingresar</button>
+        <button type="button" class="lume-enlace" [attr.aria-disabled]="enviando() || null" (click)="reenviar()">Enviar otro código</button>
+      </form>
+    } @else {
+      <form class="lume-pila" [lumeValidacion]="v" novalidate (submit)="$event.preventDefault(); ingresar()">
+        <lume-campo etiqueta="Usuario" obligatorio [error]="v.error('usuario')">
+          <input lumeEntrada autocomplete="username" maxlength="50" [value]="usuario()" (input)="escribir('usuario', $event)" />
+        </lume-campo>
+        <lume-campo etiqueta="Contraseña" obligatorio clave [error]="v.error('clave')">
+          <input lumeEntrada type="password" autocomplete="current-password" maxlength="200" [value]="clave()" (input)="escribir('clave', $event)" />
+        </lume-campo>
+        <lume-turnstile (resuelto)="alResolverCaptcha($event)" />
+        <button lumeBoton type="submit" [cargando]="enviando()">Ingresar</button>
+        <!-- El código de verificación va solo por correo: el anexo no pide SMS para el ingreso -->
+        <p class="lume-texto-ayuda" data-testid="aviso-codigo">
+          Para ingresar le enviaremos un código de verificación a su correo electrónico registrado.
+        </p>
+        <a routerLink="/olvide-clave" class="lume-texto-pequeno">¿Olvidó su contraseña?</a>
+      </form>
+    }
+  </div>
+</main>

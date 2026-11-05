@@ -1,16 +1,25 @@
-import { Component, signal } from '@angular/core';
+import { Component, DestroyRef, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { RegionAvisos } from './ui/avisos';
+import { Sonido } from './ui/sonido';
 
 /**
- * Raíz de LUME en Angular (ADR-011). Esqueleto de la fase I1: la sesión angular-base pone aquí el shell, el design system LUME
- * (tokens CSS) y el cliente generado desde contratos/.
+ * Raíz de LUME en Angular (ADR-011): las rutas (públicas o el shell con sesión) y la región de avisos. El sonido de validación queda
+ * listo en el primer gesto del usuario y también suena con la validación nativa del navegador, como en main.tsx del monolito.
  */
 @Component({
   selector: 'lume-root',
-  imports: [RouterOutlet],
-  templateUrl: './app.html',
-  styleUrl: './app.css',
+  imports: [RouterOutlet, RegionAvisos],
+  template: '<router-outlet /><lume-avisos />',
 })
 export class App {
-  protected readonly titulo = signal('LUME · Suite DIGSA');
+  constructor() {
+    const sonido = inject(Sonido);
+    const quitarGesto = sonido.prepararEnPrimerGesto();
+    const quitarNativa = sonido.sonarEnValidacionNativa();
+    inject(DestroyRef).onDestroy(() => {
+      quitarGesto();
+      quitarNativa();
+    });
+  }
 }
