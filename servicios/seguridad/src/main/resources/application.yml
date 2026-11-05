@@ -2,8 +2,12 @@
 # correo, Turnstile, sesión única, claves y JWK persistentes con rotación). Ningún secreto tiene valor por defecto: vienen del .env.
 server:
   port: ${SEGURIDAD_PUERTO:9101}
-  # Detrás del gateway: arma redirecciones y el emisor con el host público. En el cierre se restringe a las IP del gateway.
-  forward-headers-strategy: framework
+  # Detrás del gateway: arma redirecciones y el emisor con el host público.
+  # X-Forwarded-* solo se aceptan del gateway (ADR-003): RemoteIpValve con proxies internos acotados.
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      internal-proxies: ${LUME_PROXIES_INTERNOS:127\.0\.0\.1|0:0:0:0:0:0:0:1}
   servlet:
     session:
       # Nunca el id de sesión en la URL (;LUME_IDP=...): solo por cookie.
@@ -21,10 +25,7 @@ spring:
     virtual:
       enabled: true
   security:
-    user:
-      name: ${LUME_USUARIO_DEV:}
-      password: ${LUME_CLAVE_DEV:}
-      roles: ${LUME_PERFIL_DEV:ADMINISTRADOR}
+    # El usuario de desarrollo y el cliente "humo" solo existen en el perfil local (application-local.yml).
     oauth2:
       authorizationserver:
         issuer: ${LUME_EMISOR:http://localhost:9000}
@@ -43,16 +44,9 @@ spring:
             token:
               access-token-time-to-live: 5m
               refresh-token-time-to-live: 8h
-              reuse-refresh-tokens: false
-          humo:
-            registration:
-              client-id: humo
-              client-secret: ${LUME_HUMO_SECRETO_CODIFICADO:}
-              client-authentication-methods: client_secret_basic
-              authorization-grant-types: client_credentials
-              scopes: lume.humo
-            token:
-              access-token-time-to-live: 5m
+              # Cliente confidencial (el refresh token nunca sale del gateway): se reutiliza para que dos peticiones paralelas que
+              # refrescan a la vez no invaliden la sesión. S1 decide si rota con refresco serializado por sesión.
+              reuse-refresh-tokens: true
 
 management:
   endpoints:

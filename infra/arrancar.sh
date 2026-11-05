@@ -10,6 +10,7 @@ set -a
 . "$raiz/infra/.env"
 set +a
 puerto_var="$(echo "$servicio" | tr '[:lower:]' '[:upper:]')_PUERTO"
+export SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-local}"
 export SERVER_PORT="${!puerto_var:?No hay ${puerto_var} en infra/.env}"
 export REDIS_PUERTO
 jar="$(ls "$raiz/servicios/$servicio/target/lume-$servicio-"*.jar 2>/dev/null | grep -v original | head -1 || true)"

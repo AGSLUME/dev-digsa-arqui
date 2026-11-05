@@ -77,6 +77,12 @@ class GatewayTest {
                 .startsWith(ConfiguracionSeguridadGateway.SESION + "=").containsIgnoringCase("HttpOnly").contains("SameSite=Strict"));
     }
 
+    /** ADR-009: las métricas nunca salen por el puerto público del gateway. */
+    @Test
+    void lasMetricasNoSePublicanEnElPuertoPublico() {
+        web.get().uri("/actuator/prometheus").exchange().expectStatus().value(s -> assertThat(s).isIn(401, 403));
+    }
+
     @Test
     void publicaLaCookieCsrfYLasCabecerasDeSeguridad() {
         var r = web.get().uri("/actuator/health").exchange().expectStatus().isOk().returnResult(String.class);

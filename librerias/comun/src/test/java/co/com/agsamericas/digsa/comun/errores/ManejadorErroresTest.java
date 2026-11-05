@@ -34,6 +34,11 @@ class ManejadorErroresTest {
             throw new IllegalStateException("detalle interno que no debe salir");
         }
 
+        @GetMapping("/estado")
+        String estado() {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT, "detalle interno");
+        }
+
         @PostMapping("/validar")
         String validar(@Valid @RequestBody Datos d) {
             return "ok";
@@ -67,6 +72,19 @@ class ManejadorErroresTest {
         mvc.perform(post("/validar").contentType(MediaType.APPLICATION_JSON).content("{no es json"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.mensaje").value(ManejadorErrores.PETICION_MAL));
+    }
+
+    @Test
+    void unaExcepcionConEstado4xxConservaSuEstadoYNoEs500() throws Exception {
+        mvc.perform(get("/estado"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.mensaje").value(ManejadorErrores.PETICION_MAL));
+    }
+
+    @Test
+    void unTipoDeContenidoNoSoportadoEs415() throws Exception {
+        mvc.perform(post("/validar").contentType(MediaType.TEXT_PLAIN).content("x"))
+                .andExpect(status().isUnsupportedMediaType());
     }
 
     @Test

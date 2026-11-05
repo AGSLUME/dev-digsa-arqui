@@ -16,6 +16,8 @@ Puerto = base + desfase de la sesión. Todo se publica solo en `127.0.0.1`.
 | visitas | 9102 | 9102 | 9202 | 9302 | 9402 | 9502 | 9602 |
 | reportes | 9103 | 9103 | 9203 | 9303 | 9403 | 9503 | 9603 |
 | notificaciones | 9104 | 9104 | 9204 | 9304 | 9404 | 9504 | 9604 |
+| hola (humo I1, temporal) | 9109 | 9109 | 9209 | 9309 | 9409 | 9509 | 9609 |
+| monolito (convivencia) | 9050 | 9050 | 9150 | 9250 | 9350 | 9450 | 9550 |
 | Angular (+desfase/10) | 4200 | 4200 | 4210 | 4220 | 4230 | 4240 | 4250 |
 | PostgreSQL (+desfase/100) | 5440 | 5440 | 5441 | 5442 | 5443 | 5444 | 5445 |
 | RabbitMQ AMQP | 5672 | 5672 | 5772 | 5872 | 5972 | 6072 | 6172 |

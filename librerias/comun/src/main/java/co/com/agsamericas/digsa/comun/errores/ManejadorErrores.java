@@ -4,6 +4,9 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.web.ErrorResponse;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +35,7 @@ public class ManejadorErrores {
     static final String MUY_GRANDE = "Los archivos superan el tamaño máximo permitido por petición.";
     static final String METODO = "Método no permitido.";
     static final String NO_EXISTE = "No existe.";
+    static final String SIN_SESION = "La sesión expiró. Vuelva a iniciar sesión.";
     static final String INTERNO = "Ocurrió un error en el servidor. Intente de nuevo o avise al administrador.";
 
     @ExceptionHandler(ErrorNegocio.class)
@@ -76,8 +80,22 @@ public class ManejadorErrores {
         return responder(Problemas.de(HttpStatus.NOT_FOUND, NO_EXISTE));
     }
 
+    /** 401 desde la seguridad por métodos: mismo cuerpo que el resto de la API. */
+    @ExceptionHandler(AuthenticationException.class)
+    ResponseEntity<ProblemDetail> sinSesion(AuthenticationException e) {
+        return responder(Problemas.de(HttpStatus.UNAUTHORIZED, SIN_SESION, Map.of("motivo", "sin_sesion")));
+    }
+
+    /**
+     * Lo no controlado es 500 con registro de incidente, salvo las excepciones de Spring que ya traen un estado 4xx (415, cabecera
+     * faltante, {@code ResponseStatusException}...): se respeta su estado, sin registrarlas como incidente y con texto genérico.
+     */
     @ExceptionHandler(Exception.class)
     ResponseEntity<ProblemDetail> interno(Exception e) {
+        if (e instanceof ErrorResponse er && er.getStatusCode().is4xxClientError()) {
+            HttpStatusCode estado = er.getStatusCode();
+            return responder(Problemas.de(estado, estado.value() == 404 ? NO_EXISTE : PETICION_MAL));
+        }
         LOG.error("Error no controlado", e);
         return responder(Problemas.de(HttpStatus.INTERNAL_SERVER_ERROR, INTERNO));
     }

@@ -1,0 +1,19 @@
+# Solo en local (SPRING_PROFILES_ACTIVE=local, lo pone infra/arrancar.sh). Nunca en otro entorno.
+spring:
+  security:
+    user:
+      name: ${LUME_USUARIO_DEV}
+      password: ${LUME_CLAVE_DEV}
+      roles: ${LUME_PERFIL_DEV:ADMINISTRADOR}
+    oauth2:
+      authorizationserver:
+        client:
+          humo:
+            registration:
+              client-id: humo
+              client-secret: ${LUME_HUMO_SECRETO_CODIFICADO}
+              client-authentication-methods: client_secret_basic
+              authorization-grant-types: client_credentials
+              scopes: lume.humo
+            token:
+              access-token-time-to-live: 5m

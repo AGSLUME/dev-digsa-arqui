@@ -1,6 +1,10 @@
 server:
   port: ${HOLA_PUERTO:9109}
-  forward-headers-strategy: framework
+  # X-Forwarded-* solo se aceptan del gateway (ADR-003): RemoteIpValve con proxies internos acotados.
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      internal-proxies: ${LUME_PROXIES_INTERNOS:127\.0\.0\.1|0:0:0:0:0:0:0:1}
 
 spring:
   application:

@@ -77,7 +77,9 @@ class ConfiguracionSeguridadGateway {
                 .securityMatcher(new NegatedServerWebExchangeMatcher(ServerWebExchangeMatchers.pathMatchers(
                         "/login", "/oauth2/**", "/.well-known/**", "/userinfo", "/connect/**")))
                 .authorizeExchange(a -> a
-                        .pathMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
+                        .pathMatchers("/actuator/health/**", "/actuator/info").permitAll()
+                        // Métricas: nunca por el puerto público (ADR-009). En el cierre se leen por el puerto interno de gestión.
+                        .pathMatchers("/actuator/**").denyAll()
                         .pathMatchers("/bff/**").permitAll()
                         .pathMatchers("/api/**").authenticated()
                         .anyExchange().permitAll())

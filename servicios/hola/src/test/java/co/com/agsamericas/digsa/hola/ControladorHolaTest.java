@@ -43,13 +43,30 @@ class ControladorHolaTest {
 
     @Test
     void conTokenSaludaAlUsuarioDelToken() throws Exception {
-        Jwt token = Jwt.withTokenValue("prueba").header("alg", "RS256").subject("7")
+        Jwt token = Jwt.withTokenValue("prueba").header("alg", "RS256").subject("7").claim("uid", 7L)
                 .claim("usuario", "ana.prueba").claim("nombre", "Ana Prueba").claim("perfiles", List.of("ANALISTA")).build();
         mvc.perform(get("/api/hola").with(authentication(new ConvertidorJwt().convert(token))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.mensaje").value("Hola, Ana Prueba."))
                 .andExpect(jsonPath("$.usuario").value("ana.prueba"))
                 .andExpect(jsonPath("$.perfiles[0]").value("ANALISTA"));
+    }
+
+    /** Un token de máquina (client_credentials, sin uid) no entra a las API de personas. */
+    @Test
+    void unTokenDeMaquinaNoEntraALaApiDeUsuarios() throws Exception {
+        Jwt token = Jwt.withTokenValue("prueba").header("alg", "RS256").subject("humo").claim("scope", "lume.humo").build();
+        mvc.perform(get("/api/hola").with(authentication(new ConvertidorJwt().convert(token))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.mensaje").value("No tiene permiso para esta acción."));
+    }
+
+    /** Lo que no está declarado queda cerrado: ninguna ruta del servicio queda sin regla. */
+    @Test
+    void unaRutaNoDeclaradaQuedaCerrada() throws Exception {
+        Jwt token = Jwt.withTokenValue("prueba").header("alg", "RS256").subject("7").claim("uid", 7L).build();
+        mvc.perform(get("/otra-cosa").with(authentication(new ConvertidorJwt().convert(token))))
+                .andExpect(status().isForbidden());
     }
 
     @Test

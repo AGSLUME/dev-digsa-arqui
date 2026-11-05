@@ -38,6 +38,7 @@ class ClaimsToken {
                     .map(a -> a.substring("ROLE_".length()).toUpperCase(Locale.ROOT))
                     .toList();
             ctx.getClaims()
+                    .claim("uid", 1L) // ficticio: el único usuario del andamiaje; en S1 es el id real (el mismo del monolito)
                     .claim("usuario", principal.getName())
                     .claim("nombre", principal.getName())
                     .claim("perfiles", perfiles)
