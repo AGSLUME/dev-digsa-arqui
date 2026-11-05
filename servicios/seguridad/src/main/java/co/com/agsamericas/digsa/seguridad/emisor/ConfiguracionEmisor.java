@@ -37,9 +37,9 @@ class ConfiguracionEmisor {
     @Order(2)
     SecurityFilterChain cadenaIngreso(HttpSecurity http) throws Exception {
         http
-                .authorizeHttpRequests(a -> a
-                        .requestMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
-                        .anyRequest().authenticated())
+                // Solo el formulario del andamiaje; el resto lo cubre la cadena de recurso de lume-comun, que va de última.
+                .securityMatcher("/login", "/logout")
+                .authorizeHttpRequests(a -> a.anyRequest().permitAll())
                 .formLogin(Customizer.withDefaults());
         return http.build();
     }

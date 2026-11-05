@@ -23,9 +23,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Valores solo de prueba (ficticios), no son secretos de ningún entorno. */
-@ActiveProfiles("local")
+@ActiveProfiles({"local", "prueba"})
+@org.springframework.context.annotation.Import(co.com.agsamericas.digsa.seguridad.soporte.ContenedoresPrueba.class)
 @SpringBootTest(properties = {
-        "LUME_GATEWAY_SECRETO_CODIFICADO={noop}gateway-solo-prueba",
         "LUME_HUMO_SECRETO_CODIFICADO={noop}humo-solo-prueba",
         "LUME_USUARIO_DEV=dev.prueba",
         "LUME_CLAVE_DEV=Clave-Solo-Prueba-1"})
@@ -44,7 +44,8 @@ class EmisorTest {
     @Test
     void laSaludEsPublicaYElRestoPideIngreso() throws Exception {
         mvc.perform(get("/actuator/health/readiness")).andExpect(status().isOk());
-        mvc.perform(get("/cualquier-cosa").accept(MediaType.TEXT_HTML)).andExpect(status().is3xxRedirection());
+        // Lo no declarado queda cerrado por la cadena de recurso de lume-comun.
+        mvc.perform(get("/cualquier-cosa").accept(MediaType.TEXT_HTML)).andExpect(status().is4xxClientError());
     }
 
     @Test
