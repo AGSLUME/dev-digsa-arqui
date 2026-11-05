@@ -31,6 +31,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <spring-cloud.version>2025.1.4</spring-cloud.version>
+        <!-- ADR-007: interfaces Spring generadas desde contratos/. Maven Central, 2026-10-06, firmado (PGP); pom SHA-1 93b06e5b. -->
+        <openapi-generator.version>7.26.0</openapi-generator.version>
         <lume.version>${project.version}</lume.version>
     </properties>
 
@@ -59,6 +61,11 @@
     <build>
         <pluginManagement>
             <plugins>
+                <plugin>
+                    <groupId>org.openapitools</groupId>
+                    <artifactId>openapi-generator-maven-plugin</artifactId>
+                    <version>${openapi-generator.version}</version>
+                </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
