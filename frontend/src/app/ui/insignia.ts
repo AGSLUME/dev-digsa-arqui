@@ -45,12 +45,14 @@ export class Insignia {
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
-    role: 'alert',
+    '[attr.role]': "rol() === 'none' ? null : rol()",
     '[class]': "'lume-alerta lume-alerta--' + varianteActual()",
   },
 })
 export class Alerta {
   readonly color = input<string | undefined>(undefined);
   readonly titulo = input<string | undefined>(undefined);
+  /** `alert` por omisión (como el de Mantine); `none` cuando otra región ya anuncia (los avisos). */
+  readonly rol = input<'alert' | 'status' | 'none'>('alert');
   protected readonly varianteActual = computed(() => variante(this.color()));
 }
