@@ -163,6 +163,15 @@ class TokensTest extends PruebaIntegracion {
     }
 
     @Test
+    @DisplayName("ADR-014: la sesión del emisor usa la cookie LUME_IDP, HttpOnly y SameSite=Lax (la única que el gateway deja pasar)")
+    void laCookieDelEmisorEsLumeIdp() throws Exception {
+        var r = navegador().navegar(AUTORIZAR).andExpect(status().isFound()).andReturn().getResponse();
+        assertThat(r.getHeaders("Set-Cookie")).anySatisfy(c -> assertThat(c).startsWith("LUME_IDP=").contains("HttpOnly")
+                .contains("SameSite=Lax"));
+        assertThat(r.getHeaders("Set-Cookie")).noneSatisfy(c -> assertThat(c).startsWith("SESSION="));
+    }
+
+    @Test
     @DisplayName("El código de autorización no se emite sin PKCE ni con otro redirect_uri")
     void elEmisorExigePkceYRedirectRegistrado() throws Exception {
         Navegador n = navegador();

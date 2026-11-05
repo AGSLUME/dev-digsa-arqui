@@ -17,7 +17,8 @@ import org.springframework.web.bind.annotation.RestController;
  * de recurso de lume-comun ya exige un token en {@code /interno/**}.
  */
 @RestController
-@PreAuthorize("hasAuthority('SCOPE_seguridad:sesiones')")
+// Token de máquina (sin uid) con el alcance: un token de usuario nunca entra aunque trajera el alcance
+@PreAuthorize("hasAuthority('SCOPE_seguridad:sesiones') and principal?.claims?.get('uid') == null")
 class ControladorInterno implements InternoApi {
 
     private final ServicioEstadoSesion estados;

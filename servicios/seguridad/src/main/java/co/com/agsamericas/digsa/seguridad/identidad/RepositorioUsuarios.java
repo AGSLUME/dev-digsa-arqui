@@ -90,6 +90,32 @@ public class RepositorioUsuarios {
                 .param("id", id).query(Boolean.class).optional().orElse(false);
     }
 
+    /**
+     * Reserva un intento de contraseña ANTES de compararla: suma uno solo si la cuenta no está bloqueada y no hay ya {@code maximo}
+     * intentos (un bloqueo vencido reinicia la cuenta). Atómico: N ingresos en paralelo no comparan más de {@code maximo} veces.
+     *
+     * @return el número de este intento, o vacío si la cuenta está bloqueada o ya agotó los intentos
+     */
+    public Optional<Integer> reservarIntento(long id, Instant ahora, int maximo) {
+        return jdbc.sql("""
+                UPDATE usuarios SET
+                  intentos = CASE WHEN bloqueado_hasta IS NOT NULL AND bloqueado_hasta <= :ahora THEN 1 ELSE intentos + 1 END,
+                  bloqueado_hasta = CASE WHEN bloqueado_hasta IS NOT NULL AND bloqueado_hasta <= :ahora THEN NULL ELSE bloqueado_hasta END
+                WHERE id = :id AND (bloqueado_hasta IS NULL OR bloqueado_hasta <= :ahora)
+                  AND (CASE WHEN bloqueado_hasta IS NOT NULL AND bloqueado_hasta <= :ahora THEN 0 ELSE intentos END) < :maximo
+                RETURNING intentos""")
+                .param("ahora", odt(ahora)).param("id", id).param("maximo", maximo).query(Integer.class).optional();
+    }
+
+    /** Tras una contraseña errada: si este intento llegó al máximo, bloquea {@code minutosBloqueo}. @return true si bloqueó */
+    public boolean bloquearSiAlcanzo(long id, int intento, Instant ahora, int maximo, int minutosBloqueo) {
+        if (intento < maximo) {
+            return false;
+        }
+        return jdbc.sql("UPDATE usuarios SET bloqueado_hasta = :hasta, actualizado = :ahora WHERE id = :id AND bloqueado_hasta IS NULL")
+                .param("hasta", odt(ahora.plusSeconds(minutosBloqueo * 60L))).param("ahora", odt(ahora)).param("id", id).update() == 1;
+    }
+
     public void reiniciarIntentos(long id, Instant ahora) {
         jdbc.sql("UPDATE usuarios SET intentos = 0, bloqueado_hasta = NULL, actualizado = :ahora WHERE id = :id AND (intentos <> 0 OR bloqueado_hasta IS NOT NULL)")
                 .param("ahora", odt(ahora)).param("id", id).update();

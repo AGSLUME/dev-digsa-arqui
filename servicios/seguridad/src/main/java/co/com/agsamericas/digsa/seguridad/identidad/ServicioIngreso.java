@@ -136,13 +136,22 @@ public class ServicioIngreso {
         } else if (encontrado.get().bloqueado(ahora)) {
             coincide(clave, hashRelleno);
             motivo = "Intento con el usuario bloqueado";
-        } else if (!coincide(clave, encontrado.get().claveHash())) {
-            if (usuarios.registrarFallo(encontrado.get().id(), ahora, INTENTOS_MAXIMOS, MINUTOS_BLOQUEO)) {
-                bitacora.escribir(Bitacora.Operacion.INGRESO, "cuenta_bloqueada", "Usuario bloqueado " + MINUTOS_BLOQUEO
-                        + " minutos por " + INTENTOS_MAXIMOS + " intentos fallidos", encontrado.get().id(), encontrado.get().usuario(), ip);
+        } else {
+            // El intento se RESERVA antes de comparar (revisión de seguridad, M2): con la cuenta bloqueada o con 5 intentos ya en curso,
+            // no se compara; así N peticiones en paralelo no hacen más de 5 comparaciones ni un acierto tardío borra el bloqueo.
+            Optional<Integer> intento = usuarios.reservarIntento(encontrado.get().id(), ahora, INTENTOS_MAXIMOS);
+            if (intento.isEmpty()) {
+                coincide(clave, hashRelleno);
+                motivo = "Intento con el usuario bloqueado";
+            } else if (!coincide(clave, encontrado.get().claveHash())) {
+                if (usuarios.bloquearSiAlcanzo(encontrado.get().id(), intento.get(), ahora, INTENTOS_MAXIMOS, MINUTOS_BLOQUEO)) {
+                    bitacora.escribir(Bitacora.Operacion.INGRESO, "cuenta_bloqueada", "Usuario bloqueado " + MINUTOS_BLOQUEO
+                            + " minutos por " + INTENTOS_MAXIMOS + " intentos fallidos", encontrado.get().id(), encontrado.get().usuario(), ip);
+                }
+                motivo = "contraseña incorrecta";
             }
-            motivo = "contraseña incorrecta";
-        } else if (encontrado.get().claveInicialVencida(ahora)) {
+        }
+        if (motivo == null && encontrado.get().claveInicialVencida(ahora)) {
             motivo = "contraseña inicial vencida (" + RepositorioUsuarios.HORAS_CLAVE_INICIAL + " h): el administrador debe asignar otra";
         }
         if (motivo != null) {
@@ -155,6 +164,9 @@ public class ServicioIngreso {
         usuarios.reiniciarIntentos(u.id(), ahora);
         verificarSesionLibre(u, ahora, ip);
         HttpSession s = req.getSession(true);
+        if (!s.isNew()) {
+            req.changeSessionId(); // id nuevo tras la contraseña (conserva la autorización guardada): fijación de sesión
+        }
         limpiarIngreso(s);
         if ((u.claveInicial() && u.debeCambiarClave()) || u.claveVencida(ahora)) {
             // Contraseña inicial del administrador o vencida: se cambia aquí mismo, sin ir al correo (prueba 2 y condición 12)
@@ -201,17 +213,21 @@ public class ServicioIngreso {
                         rs.getInt("intentos"), rs.getTimestamp("usado") != null))
                 .optional()
                 .orElseThrow(() -> ErrorNegocio.validacion("No hay un código vigente. Pida un código nuevo."));
-        if (!Mfa.usable(c.vence(), c.intentos(), c.usado(), ahora) || !Mfa.codigoValido(codigo, c.huella())) {
-            // El intento se suma de forma atómica: dos intentos simultáneos cuentan los dos
-            int intentos = jdbc.sql("UPDATE mfa_codigos SET intentos = intentos + 1 WHERE id = :id RETURNING intentos")
-                    .param("id", c.id()).query(Integer.class).single();
+        // El intento se RESERVA antes de comparar, en una sola sentencia (revisión de seguridad, M1): N verificaciones en paralelo no
+        // pueden hacer más de 5 comparaciones contra el mismo código. Sin fila = vencido, usado o agotado.
+        Optional<Integer> reservado = jdbc.sql("""
+                UPDATE mfa_codigos SET intentos = intentos + 1
+                WHERE id = :id AND usado IS NULL AND intentos < :max AND vence >= :ahora RETURNING intentos""")
+                .param("id", c.id()).param("max", Mfa.INTENTOS).param("ahora", ahora.atOffset(ZoneOffset.UTC))
+                .query(Integer.class).optional();
+        if (reservado.isEmpty() || !Mfa.codigoValido(codigo, c.huella())) {
             bitacora.escribir(Bitacora.Operacion.INGRESO, "mfa_fallido", "Código de verificación incorrecto o vencido", u.id(), u.usuario(), ip);
-            boolean agotado = intentos >= Mfa.INTENTOS || ahora.isAfter(c.vence()) || c.usado();
+            boolean agotado = reservado.map(i -> i >= Mfa.INTENTOS).orElse(true);
             throw ErrorNegocio.validacion(agotado ? "El código venció o superó los intentos. Pida un código nuevo."
                     : "El código no es correcto. Revise el último correo que le enviamos.");
         }
-        int consumido = jdbc.sql("UPDATE mfa_codigos SET usado = :ahora WHERE id = :id AND usado IS NULL AND intentos < :max AND vence >= :ahora")
-                .param("ahora", ahora.atOffset(ZoneOffset.UTC)).param("id", c.id()).param("max", Mfa.INTENTOS).update();
+        int consumido = jdbc.sql("UPDATE mfa_codigos SET usado = :ahora WHERE id = :id AND usado IS NULL AND vence >= :ahora")
+                .param("ahora", ahora.atOffset(ZoneOffset.UTC)).param("id", c.id()).update();
         if (consumido != 1) {
             throw ErrorNegocio.validacion("El código venció o ya se usó. Pida un código nuevo.");
         }

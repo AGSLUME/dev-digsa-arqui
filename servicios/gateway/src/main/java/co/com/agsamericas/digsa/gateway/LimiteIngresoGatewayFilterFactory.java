@@ -4,6 +4,7 @@ import java.net.InetSocketAddress;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
@@ -42,6 +43,7 @@ class LimiteIngresoGatewayFilterFactory extends AbstractGatewayFilterFactory<Obj
     static final int MAXIMO_CUERPO = 4096;
     static final String DEMASIADAS = "Demasiados intentos seguidos. Espere un minuto e intente de nuevo.";
     private static final Set<String> CON_USUARIO = Set.of("/api/auth/ingreso", "/api/auth/olvide");
+    private static final Set<String> CON_SESION = Set.of("/api/auth/codigo", "/api/auth/codigo/reenviar", "/api/auth/cambiar-clave");
     private static final Duration VENTANA = Duration.ofMinutes(1);
     private static final Logger LOG = LoggerFactory.getLogger(LimiteIngresoGatewayFilterFactory.class);
     private static final JsonMapper JSON = JsonMapper.builder().build();
@@ -66,9 +68,22 @@ class LimiteIngresoGatewayFilterFactory extends AbstractGatewayFilterFactory<Obj
         return (exchange, chain) -> {
             String ip = ip(exchange);
             String ruta = exchange.getRequest().getPath().pathWithinApplication().value();
+            // Una ruta codificada (/api/auth/%69ngreso) la decodifica el servicio pero no casaría con las rutas de abajo: no se admite
+            // (revisión de seguridad, M3)
+            if (ruta.indexOf('%') >= 0) {
+                return ConfiguracionSeguridadGateway.responder(exchange.getResponse(), 400, "La petición no tiene el formato esperado.", null);
+            }
             long ventana = reloj.millis() / VENTANA.toMillis();
             Mono<Boolean> porIpOk = dentro("ip:" + ip + ":" + ventana, porIp);
-            if (exchange.getRequest().getMethod() != HttpMethod.POST || !CON_USUARIO.contains(ruta)) {
+            boolean post = exchange.getRequest().getMethod() == HttpMethod.POST;
+            if (post && CON_SESION.contains(ruta)) {
+                // Código, reenvío y cambio de clave: además, por sesión de ingreso (cookie del emisor), o por IP si no la trae (M1)
+                String clave = exchange.getRequest().getCookies().getOrDefault(SoloCookieEmisorGatewayFilterFactory.COOKIE, List.of())
+                        .stream().findFirst().map(c -> "sesion:" + huella(c.getValue())).orElse("sinsesion:" + ip);
+                return porIpOk.flatMap(ok -> ok ? dentro(clave + ":" + ventana, porUsuario) : Mono.just(false))
+                        .flatMap(ok -> ok ? chain.filter(exchange) : demasiadas(exchange));
+            }
+            if (!post || !CON_USUARIO.contains(ruta)) {
                 return porIpOk.flatMap(ok -> ok ? chain.filter(exchange) : demasiadas(exchange));
             }
             return porIpOk.flatMap(ok -> {
@@ -80,10 +95,10 @@ class LimiteIngresoGatewayFilterFactory extends AbstractGatewayFilterFactory<Obj
                         .defaultIfEmpty(new byte[0])
                         .flatMap(cuerpo -> {
                             ServerWebExchange conCuerpo = exchange.mutate().request(reponer(exchange.getRequest(), cuerpo)).build();
-                            return usuario(cuerpo)
-                                    .map(u -> dentro("usuario:" + u + ":" + ventana, porUsuario)
-                                            .flatMap(bien -> bien ? chain.filter(conCuerpo) : demasiadas(conCuerpo)))
-                                    .orElseGet(() -> chain.filter(conCuerpo));
+                            // Sin un usuario legible (JSON raro que el servicio sí podría leer): el mismo límite, por IP (M3)
+                            String clave = usuario(cuerpo).map(u -> "usuario:" + u).orElse("sinusuario:" + ip);
+                            return dentro(clave + ":" + ventana, porUsuario)
+                                    .flatMap(bien -> bien ? chain.filter(conCuerpo) : demasiadas(conCuerpo));
                         })
                         // Cuerpo de más de 4 KB: no es un ingreso legítimo
                         .onErrorResume(org.springframework.core.io.buffer.DataBufferLimitException.class,
@@ -125,6 +140,16 @@ class LimiteIngresoGatewayFilterFactory extends AbstractGatewayFilterFactory<Obj
             return Optional.of(u.length() > 150 ? u.substring(0, 150) : u);
         } catch (RuntimeException e) {
             return Optional.empty();
+        }
+    }
+
+    /** Huella corta de la cookie de sesión del emisor para la clave de Redis (nunca el valor en claro). */
+    static String huella(String valor) {
+        try {
+            byte[] h = java.security.MessageDigest.getInstance("SHA-256").digest(valor.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(h, 0, 16);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
         }
     }
 

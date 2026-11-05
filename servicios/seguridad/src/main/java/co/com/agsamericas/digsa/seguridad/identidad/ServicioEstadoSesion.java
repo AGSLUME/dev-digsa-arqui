@@ -58,7 +58,8 @@ public class ServicioEstadoSesion {
             if (!vigente || ultimo == null) {
                 return 0;
             }
-            return Math.max(0, minutos * 60L - Duration.between(ultimo, ahora).toSeconds());
+            // En milisegundos: la base guarda microsegundos y truncar los segundos transcurridos daría uno de más
+            return Math.max(0, (minutos * 60_000L - Duration.between(ultimo, ahora).toMillis()) / 1000);
         }
     }
 

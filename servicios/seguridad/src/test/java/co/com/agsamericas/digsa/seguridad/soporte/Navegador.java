@@ -59,6 +59,11 @@ public class Navegador {
         return cookies.containsKey("LUME_IDP");
     }
 
+    /** Una cookie que el navegador tiene guardada (o null). */
+    public Cookie cookie(String nombre) {
+        return cookies.get(nombre);
+    }
+
     public void olvidarCookies() {
         cookies.clear();
     }

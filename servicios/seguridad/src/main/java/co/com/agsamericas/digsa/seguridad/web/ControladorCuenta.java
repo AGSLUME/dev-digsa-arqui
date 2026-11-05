@@ -7,6 +7,7 @@ import co.com.agsamericas.digsa.seguridad.api.CuentaApi;
 import co.com.agsamericas.digsa.seguridad.api.modelo.CambioClave;
 import co.com.agsamericas.digsa.seguridad.api.modelo.Mensaje;
 import co.com.agsamericas.digsa.seguridad.identidad.ServicioClaves;
+import co.com.agsamericas.digsa.seguridad.identidad.ServicioEstadoSesion;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -24,10 +25,12 @@ import org.springframework.web.bind.annotation.RestController;
 class ControladorCuenta implements CuentaApi {
 
     private final ServicioClaves claves;
+    private final ServicioEstadoSesion estados;
     private final HttpServletRequest req;
 
-    ControladorCuenta(ServicioClaves claves, HttpServletRequest req) {
+    ControladorCuenta(ServicioClaves claves, ServicioEstadoSesion estados, HttpServletRequest req) {
         this.claves = claves;
+        this.estados = estados;
         this.req = req;
     }
 
@@ -37,6 +40,11 @@ class ControladorCuenta implements CuentaApi {
         String clave = Validar.obligatorio(c.getClave(), "clave", "Escriba la contraseña nueva.", 200);
         UsuarioActual u = UsuarioActual.actual().filter(x -> x.uid() != null).orElseThrow(() -> new ErrorNegocio(HttpStatus.UNAUTHORIZED,
                 "La sesión expiró. Vuelva a iniciar sesión.", java.util.Map.of("motivo", "sin_sesion")));
+        // Como el FiltroSesion del monolito: la sesión del token debe seguir abierta (un token de hasta 5 min ya cerrado no sirve)
+        ServicioEstadoSesion.Estado e = estados.evaluar(sid());
+        if (!e.vigente()) {
+            throw new ErrorNegocio(HttpStatus.UNAUTHORIZED, e.mensaje(), java.util.Map.of("motivo", e.motivo()));
+        }
         claves.cambiarPropia(u.uid(), sid(), actual, clave, c.getConfirmacion(), req.getRemoteAddr());
         return ResponseEntity.ok(new Mensaje("Su contraseña se cambió. La próxima vez ingrese con la contraseña nueva."));
     }

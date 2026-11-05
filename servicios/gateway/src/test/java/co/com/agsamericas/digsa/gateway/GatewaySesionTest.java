@@ -167,6 +167,49 @@ class GatewaySesionTest {
         post("/api/auth/ingreso", "{\"usuario\":\"bruno.prueba\",\"clave\":\"z\"}").exchange().expectStatus().isOk();
     }
 
+    @Test
+    @DisplayName("M3: una ruta codificada (/api/auth/%69ngreso) no evade el límite: 400")
+    void rutaCodificadaEs400() {
+        csrf();
+        web.post().uri(URI.create("http://localhost:" + puerto + "/api/auth/%69ngreso"))
+                .header("X-XSRF-TOKEN", cookies.get("XSRF-TOKEN")).cookie("XSRF-TOKEN", cookies.get("XSRF-TOKEN"))
+                .contentType(MediaType.APPLICATION_JSON).bodyValue("{\"usuario\":\"ana\",\"clave\":\"x\"}")
+                .exchange().expectStatus().isBadRequest();
+    }
+
+    @Test
+    @DisplayName("M3: sin un usuario legible en el cuerpo, el mismo límite se aplica por IP")
+    void sinUsuarioLegibleLimitaPorIp() {
+        csrf();
+        for (int i = 0; i < 3; i++) {
+            post("/api/auth/ingreso", "{\"usuario\":[\"raro\"],\"clave\":\"x\"}").exchange().expectStatus().isOk();
+        }
+        post("/api/auth/ingreso", "{\"usuario\":[\"raro\"],\"clave\":\"x\"}").exchange().expectStatus().isEqualTo(429);
+    }
+
+    @Test
+    @DisplayName("M1: el código tiene límite por sesión de ingreso (cookie del emisor)")
+    void codigoLimitadoPorSesionDeIngreso() {
+        csrf();
+        cookies.put("LUME_IDP", "sesion-de-ingreso-ficticia");
+        for (int i = 0; i < 3; i++) {
+            post("/api/auth/codigo", "{\"codigo\":\"00000" + i + "\"}").exchange().expectStatus().isOk();
+        }
+        post("/api/auth/codigo", "{\"codigo\":\"999999\"}").exchange().expectStatus().isEqualTo(429);
+        cookies.put("LUME_IDP", "otra-sesion-ficticia");
+        post("/api/auth/codigo", "{\"codigo\":\"999999\"}").exchange().expectStatus().isOk();
+    }
+
+    @Test
+    @DisplayName("M4: del emisor, al público solo autorizar, JWKS y descubrimiento; token, revocación e introspección dan 404")
+    void elEmisorPublicaSoloLoNecesario() {
+        web.post().uri("/oauth2/token").exchange().expectStatus().isNotFound();
+        web.post().uri("/oauth2/revoke").exchange().expectStatus().isNotFound();
+        web.post().uri("/oauth2/introspect").exchange().expectStatus().isNotFound();
+        web.get().uri("/userinfo").exchange().expectStatus().isNotFound();
+        web.get().uri("/oauth2/jwks").exchange().expectStatus().isOk().expectBody().jsonPath("$.keys[0].kid").isEqualTo("prueba");
+    }
+
     // ---------- B1: salir ----------
 
     @Test

@@ -107,6 +107,10 @@ class SesionApiTest extends PruebaIntegracion {
         UUID sid = abrir(u);
         mvc.perform(get("/interno/sesiones/" + sid)).andExpect(status().isUnauthorized());
         mvc.perform(get("/interno/sesiones/" + sid).with(token(u, sid))).andExpect(status().isForbidden());
+        // Un token de usuario no entra aunque trajera el alcance (revisión de seguridad)
+        mvc.perform(get("/interno/sesiones/" + sid).with(jwt().jwt(j -> j.claim("uid", u.id()).claim("scope", "seguridad:sesiones"))
+                        .authorities(new SimpleGrantedAuthority("SCOPE_seguridad:sesiones"))))
+                .andExpect(status().isForbidden());
         mvc.perform(get("/interno/sesiones/" + sid).with(gateway()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.vigente").value(true))

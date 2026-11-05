@@ -63,12 +63,23 @@ spring:
             for-append: false
           routes:
             # Emisor OIDC (seguridad). Va sin TokenRelay: el navegador inicia sesión allí. Solo viaja la cookie LUME_IDP (ADR-014).
+            # Al público solo lo que usa el navegador (revisión de seguridad, M4): autorizar, la JWKS y el descubrimiento. Con límite por
+            # IP: cada /oauth2/authorize anónimo crea una sesión del emisor en base.
             - id: seguridad-emisor
               uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}
               predicates:
-                - Path=/oauth2/**,/.well-known/**,/userinfo,/connect/**
+                - Path=/oauth2/authorize,/oauth2/jwks,/.well-known/**
               filters:
                 - SoloCookieEmisor=
+                - LimiteIngreso=
+            # Token, introspección, revocación, device, userinfo y logout del emisor: solo por la red interna (el gateway los usa por
+            # LUME_SEGURIDAD_URL). Desde afuera, 404.
+            - id: seguridad-emisor-interno
+              uri: no://op
+              predicates:
+                - Path=/oauth2/**,/userinfo,/connect/**
+              filters:
+                - SetStatus=404
             # Ingreso (ADR-014): público, con CSRF (cadena del gateway) y límite de tasa por IP y por usuario. Sin TokenRelay; solo LUME_IDP.
             - id: seguridad-ingreso
               uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}

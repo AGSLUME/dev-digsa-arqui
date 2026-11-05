@@ -39,6 +39,8 @@ import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.util.UriUtils;
+import org.springframework.session.web.http.CookieSerializer;
+import org.springframework.session.web.http.DefaultCookieSerializer;
 
 /**
  * Seguridad del emisor OIDC (ADR-004, ADR-014). Tres cadenas, más la de recurso de lume-comun, que va de última para todo lo demás
@@ -58,6 +60,8 @@ class ConfiguracionEmisor {
 
     /** La pantalla de ingreso de Angular (ADR-014). */
     static final String INGRESO = "/ingreso";
+    /** Cookie de la sesión del emisor (ADR-014): el gateway solo deja pasar esta. */
+    static final String COOKIE_SESION = "LUME_IDP";
 
     @Bean
     @Order(1)
@@ -110,6 +114,21 @@ class ConfiguracionEmisor {
     RequestCache peticionesGuardadas() {
         HttpSessionRequestCache c = new HttpSessionRequestCache();
         c.setMatchingRequestParameterName(null);
+        return c;
+    }
+
+    /**
+     * La cookie de la sesión del emisor, explícita (no depende de cómo se mapee server.servlet.session.cookie a Spring Session): LUME_IDP,
+     * HttpOnly, SameSite=Lax (debe viajar en la navegación a /oauth2/authorize desde el gateway), Secure fuera de local, ruta /.
+     */
+    @Bean
+    CookieSerializer cookieEmisor(@Value("${lume.url-segura:${LUME_URL_SEGURA:true}}") boolean segura) {
+        DefaultCookieSerializer c = new DefaultCookieSerializer();
+        c.setCookieName(COOKIE_SESION);
+        c.setUseHttpOnlyCookie(true);
+        c.setSameSite("Lax");
+        c.setUseSecureCookie(segura);
+        c.setCookiePath("/");
         return c;
     }
 
