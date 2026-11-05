@@ -1,0 +1,705 @@
+/*
+ * Componentes LUME (ADR-013): los estilos de src/app/ui como hoja global, con los valores de tema.ts y estilos.css del monolito
+ * (Mantine 7 con el tema LUME). Solo var(--lume-*) y var(--complemento-*); ningún color fuera de la paleta.
+ */
+
+/* ---------- Base ---------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+body {
+  margin: 0;
+  background: var(--lume-bg);
+  color: var(--lume-text);
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums;
+}
+h1,
+.lume-h1 {
+  font-size: 22px;
+  line-height: 1.3;
+  font-weight: 700;
+  margin: 0;
+}
+h2 {
+  font-size: 17px;
+  line-height: 1.35;
+  font-weight: 700;
+  margin: 0;
+}
+h3 {
+  font-size: 15px;
+  line-height: 1.4;
+  font-weight: 700;
+  margin: 0;
+}
+p {
+  margin: 0;
+}
+a {
+  color: var(--lume-blue-active);
+}
+.lume-apagado {
+  color: var(--lume-neutral-text);
+}
+
+/* Foco visible en todo (WCAG 2.4.7): azul activo, 3:1 sobre blanco y --lume-bg (tema.spec.ts) */
+:focus-visible {
+  outline: 2px solid var(--lume-blue-active);
+  outline-offset: 2px;
+}
+
+.lume-solo-lector {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Íconos SVG en línea: trazo como los de Tabler del monolito */
+svg[aria-hidden='true'] {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+.lume-lista {
+  margin: 0;
+  padding-inline-start: 1.25em;
+}
+
+/* ---------- Card ---------- */
+.lume-card {
+  background: var(--lume-white);
+  border: 1px solid var(--lume-border);
+  border-radius: var(--lume-radius);
+  box-shadow: var(--lume-shadow);
+  padding: 20px;
+}
+.lume-titulo-card {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--lume-text-muted);
+}
+
+/* ---------- Botones (tema.ts Button + estilos.css) ---------- */
+.lume-boton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.lume-boton--bloque {
+  display: flex;
+  width: 100%;
+}
+.lume-boton--pequeno {
+  min-height: 30px;
+  padding: 0 14px;
+  font-size: 12.5px;
+}
+.lume-boton--primario {
+  background: var(--lume-blue-active);
+  color: var(--lume-white);
+}
+.lume-boton--primario:hover:not(:disabled):not([data-disabled]) {
+  background: var(--lume-blue);
+}
+.lume-boton--secundario {
+  background: var(--lume-white);
+  color: var(--lume-text);
+  border-color: var(--lume-border);
+}
+.lume-boton--secundario:hover:not(:disabled):not([data-disabled]) {
+  background: var(--lume-bg);
+}
+/* Outline: hover --lume-info-bg con texto --lume-blue (el #2563EB sobre ese fondo no llega a 4,5:1) */
+.lume-boton--outline {
+  background: transparent;
+  color: var(--lume-blue-active);
+  border-color: var(--lume-blue-active);
+}
+.lume-boton--outline:hover:not(:disabled):not([data-disabled]) {
+  background: var(--lume-info-bg);
+  color: var(--lume-blue);
+}
+.lume-boton--peligro {
+  background: var(--lume-white);
+  color: var(--lume-danger);
+  border-color: var(--lume-danger-bg);
+}
+.lume-boton--peligro:hover:not(:disabled):not([data-disabled]) {
+  background: var(--lume-danger-bg);
+}
+.lume-boton--peligro-relleno {
+  background: var(--lume-danger);
+  color: var(--lume-white);
+}
+.lume-boton--sutil {
+  background: transparent;
+  color: var(--lume-blue-active);
+  padding: 0 10px;
+}
+.lume-boton--sutil:hover:not(:disabled):not([data-disabled]) {
+  background: var(--lume-info-bg);
+  color: var(--lume-blue);
+}
+/* Deshabilitado (también el de BotonConMotivo, aria-disabled): primario #93C5FD con texto blanco; el resto, apagado */
+.lume-boton:is(:disabled, [data-disabled]) {
+  cursor: not-allowed;
+  background: var(--lume-bg);
+  color: var(--lume-neutral-text);
+  border-color: var(--lume-border);
+}
+.lume-boton--primario:is(:disabled, [data-disabled]) {
+  background: var(--complemento-primario-deshabilitado);
+  color: var(--lume-white);
+  border-color: transparent;
+}
+/* Texto del motivo de un botón bloqueado: el foco llega tras un clic, que no activa :focus-visible */
+[data-motivo]:focus {
+  outline: 2px solid var(--lume-blue-active);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Botón de solo ícono (cabecera, sidebar): 44 px de objetivo táctil */
+.lume-icono-boton {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--lume-neutral-text);
+  cursor: pointer;
+}
+.lume-icono-boton:hover {
+  background: var(--lume-bg);
+}
+
+/* ---------- Insignias (tema.ts Badge + .lume-insignia) ---------- */
+.lume-insignia {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 23px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 15px;
+  white-space: nowrap;
+  background: var(--insignia-fondo);
+  color: var(--insignia-texto);
+}
+.lume-insignia::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--insignia-punto);
+}
+.lume-insignia--bloque {
+  display: flex;
+}
+/* Éxito: texto --lume-text (el verde sobre su fondo da 4,17); el punto sigue verde */
+.lume-insignia--success {
+  --insignia-fondo: var(--lume-success-bg);
+  --insignia-texto: var(--lume-text);
+  --insignia-punto: var(--lume-success-text);
+}
+.lume-insignia--warning {
+  --insignia-fondo: var(--lume-warning-bg);
+  --insignia-texto: var(--lume-warning-text);
+  --insignia-punto: var(--lume-warning-text);
+}
+.lume-insignia--info {
+  --insignia-fondo: var(--lume-info-bg);
+  --insignia-texto: var(--lume-info-text);
+  --insignia-punto: var(--lume-info-text);
+}
+.lume-insignia--neutral {
+  --insignia-fondo: var(--lume-neutral-bg);
+  --insignia-texto: var(--lume-neutral-text);
+  --insignia-punto: var(--lume-neutral-text);
+}
+.lume-insignia--danger {
+  --insignia-fondo: var(--lume-danger-bg);
+  --insignia-texto: var(--lume-danger);
+  --insignia-punto: var(--lume-danger);
+}
+
+/* ---------- Alertas (tema.ts Alert) ---------- */
+.lume-alerta {
+  display: block;
+  padding: 14px 16px;
+  border: 1px solid var(--alerta-borde);
+  border-radius: var(--lume-radius);
+  background: var(--alerta-fondo);
+  font-size: 13px;
+}
+.lume-alerta__titulo {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--alerta-texto);
+  margin-bottom: 4px;
+}
+.lume-alerta__mensaje {
+  color: var(--lume-text);
+  overflow-wrap: anywhere;
+}
+.lume-alerta--success {
+  --alerta-fondo: var(--lume-success-bg);
+  --alerta-texto: var(--lume-text);
+  --alerta-borde: var(--complemento-borde-alerta-success);
+}
+.lume-alerta--warning {
+  --alerta-fondo: var(--lume-warning-bg);
+  --alerta-texto: var(--lume-warning-text);
+  --alerta-borde: var(--complemento-borde-alerta-warning);
+}
+.lume-alerta--info {
+  --alerta-fondo: var(--lume-info-bg);
+  --alerta-texto: var(--lume-info-text);
+  --alerta-borde: var(--complemento-borde-alerta-info);
+}
+.lume-alerta--neutral {
+  --alerta-fondo: var(--lume-neutral-bg);
+  --alerta-texto: var(--lume-neutral-text);
+  --alerta-borde: var(--lume-border);
+}
+.lume-alerta--danger {
+  --alerta-fondo: var(--lume-danger-bg);
+  --alerta-texto: var(--lume-danger);
+  --alerta-borde: var(--complemento-borde-alerta-danger);
+}
+.lume-alerta:focus {
+  outline: 2px solid var(--lume-blue-active);
+  outline-offset: 2px;
+}
+
+/* ---------- Campos (tema.ts InputWrapper/Input + estilos.css) ---------- */
+.lume-campo {
+  display: block;
+  min-width: 0;
+}
+/* Etiqueta en el apagado AA (#475569): hay filtros fuera de las cards, sobre --lume-bg, donde el #64748B no llega a 4,5:1 */
+.lume-campo__etiqueta {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--lume-neutral-text);
+}
+.lume-campo__obligatorio {
+  color: var(--lume-danger);
+}
+.lume-campo__descripcion {
+  margin: -2px 0 6px;
+  font-size: 12px;
+  color: var(--lume-neutral-text);
+}
+.lume-campo__control {
+  position: relative;
+}
+.lume-campo__error {
+  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--lume-danger);
+}
+.lume-entrada {
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--lume-text-muted); /* 3:1 (WCAG 1.4.11): el --lume-border no llega y es lo único que marca el campo */
+  border-radius: 8px;
+  background: var(--lume-white);
+  color: var(--lume-text);
+  font: inherit;
+  font-size: 13.5px;
+}
+textarea.lume-entrada {
+  padding: 8px 12px;
+  min-height: 72px;
+  resize: vertical;
+}
+.lume-entrada::placeholder {
+  color: var(--lume-neutral-text);
+  opacity: 1;
+}
+.lume-campo__control--clave .lume-entrada {
+  padding-right: 44px;
+}
+/* Foco visible también en un campo con error: es el campo al que se lleva el foco después de una validación (Anexo 5 num. 2.4) */
+.lume-entrada:focus {
+  outline: 2px solid var(--lume-blue-active);
+  outline-offset: 1px;
+  border-color: var(--lume-blue-active);
+}
+.lume-entrada[aria-invalid='true'] {
+  border-color: var(--lume-danger);
+  background-color: var(--lume-danger-bg);
+  color: var(--lume-danger);
+}
+/* Validación nativa (formularios sin novalidate) que el usuario ya intentó enviar: el mismo aviso visual */
+form:not([novalidate]) .lume-entrada:user-invalid {
+  border-color: var(--lume-danger);
+  background-color: var(--lume-danger-bg);
+}
+.lume-entrada:is(:disabled, [readonly]) {
+  background-color: var(--lume-bg);
+}
+.lume-campo__ver {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: 0 8px 8px 0;
+  background: transparent;
+  color: var(--lume-neutral-text);
+  cursor: pointer;
+}
+/* En celular, 16 px en los campos: Safari de iOS amplía la página al enfocar un campo con letra más pequeña */
+@media (max-width: 48em) {
+  .lume-entrada {
+    font-size: 16px;
+  }
+}
+
+/* ---------- Encabezado de página y fuente normativa ---------- */
+.lume-encabezado {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.lume-encabezado__texto {
+  flex: 1 1 20rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lume-encabezado__titulo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.lume-encabezado__titulo > :is(h1, h2) {
+  overflow-wrap: anywhere;
+}
+.lume-encabezado__descripcion {
+  max-width: 780px;
+  font-size: 13.5px;
+  color: var(--lume-neutral-text);
+}
+.lume-encabezado__acciones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.lume-encabezado__acciones:empty {
+  display: none;
+}
+.lume-fuente {
+  font-size: 12px;
+  color: var(--lume-neutral-text);
+  background: var(--lume-bg);
+  border: 1px solid var(--lume-border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  overflow-wrap: anywhere;
+}
+@media (min-width: 48em) {
+  .lume-fuente {
+    white-space: nowrap;
+  }
+}
+
+/* ---------- Tabla (tema.ts Table) y TablaAdaptable ---------- */
+.tabla-adaptable {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.lume-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  background: var(--lume-white);
+}
+.lume-tabla th,
+.lume-tabla td {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--lume-border);
+  text-align: left;
+  vertical-align: middle;
+}
+.lume-tabla thead th {
+  padding-top: 12px;
+  padding-bottom: 12px;
+  background: var(--complemento-encabezado-tabla);
+  color: var(--lume-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.lume-tabla tbody tr:hover {
+  background: var(--complemento-fila-hover);
+}
+/* En celular y tableta vertical cada fila es una tarjeta con el nombre de la columna sobre su valor (Anexo 5 num. 1.18; UI-10) */
+@media (max-width: 47.99em) {
+  .tabla-adaptable table {
+    min-width: 0 !important;
+    width: 100%;
+    border: 0;
+    background: transparent;
+  }
+  .tabla-adaptable thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .tabla-adaptable tbody,
+  .tabla-adaptable tfoot,
+  .tabla-adaptable tr,
+  .tabla-adaptable td,
+  .tabla-adaptable tbody th {
+    display: block;
+  }
+  .tabla-adaptable tbody tr,
+  .tabla-adaptable tfoot tr {
+    background: var(--lume-white) !important;
+    border: 1px solid var(--lume-border);
+    border-radius: 10px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+  }
+  .tabla-adaptable td,
+  .tabla-adaptable tbody th {
+    border: 0 !important;
+    padding: 4px 0 !important;
+    text-align: left !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+  .tabla-adaptable td[data-etiqueta]:not([data-etiqueta=''])::before,
+  .tabla-adaptable tbody th[data-etiqueta]:not([data-etiqueta=''])::before {
+    content: attr(data-etiqueta);
+    /* Texto alternativo vacío: la etiqueta es visual; el lector de pantalla ya anuncia el encabezado de la columna */
+    content: attr(data-etiqueta) / '';
+    display: block;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--lume-neutral-text);
+  }
+}
+
+/* ---------- Modal (CDK Dialog) ---------- */
+.lume-modal-fondo {
+  background: rgba(0, 0, 0, 0.4);
+}
+.lume-modal-panel {
+  max-width: calc(100vw - 32px);
+}
+.lume-modal {
+  width: 440px;
+  max-width: 100%;
+  max-height: calc(100dvh - 64px);
+  overflow: auto;
+  background: var(--lume-white);
+  border-radius: var(--lume-radius);
+  box-shadow: var(--lume-shadow);
+  padding: 20px;
+}
+.lume-modal[data-ancho='sm'] {
+  width: 380px;
+}
+.lume-modal[data-ancho='lg'] {
+  width: 720px;
+}
+.lume-modal__cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.lume-modal__titulo {
+  font-size: 16px;
+  font-weight: 700;
+}
+.lume-modal__cerrar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--lume-neutral-text);
+  cursor: pointer;
+}
+.lume-modal__cerrar:hover {
+  background: var(--lume-bg);
+}
+.lume-modal__acciones {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+/* Modales en celular a pantalla completa (U3 del monolito): los formularios usan todo el ancho y el teclado no tapa los botones */
+@media (max-width: 47.99em) {
+  .lume-modal-panel {
+    max-width: 100vw !important;
+    width: 100vw;
+  }
+  .lume-modal {
+    width: 100vw !important;
+    max-height: 100dvh;
+    min-height: 100dvh;
+    border-radius: 0;
+  }
+}
+
+/* ---------- Formularios ---------- */
+.lume-pila {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.lume-fila {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Botón con petición en curso (`cargando`): el texto queda (es el nombre accesible) pero invisible, con un indicador encima */
+.lume-boton[data-loading] {
+  position: relative;
+  color: transparent !important;
+}
+.lume-boton[data-loading]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--lume-white);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: lume-girar 0.7s linear infinite;
+}
+.lume-boton:not(.lume-boton--primario):not(.lume-boton--peligro-relleno)[data-loading]::after {
+  border-color: var(--lume-blue-active);
+  border-right-color: transparent;
+}
+@keyframes lume-girar {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lume-boton[data-loading]::after {
+    animation-duration: 2s;
+  }
+}
+
+/* ---------- Ajustes AA de la auditoría de A1 ---------- */
+/* Enlaces y botones de texto azul dentro de una alerta: el #2563EB no llega a 4,5:1 sobre los fondos de variante (4,0–4,3); el
+   --lume-blue (#1D4ED8) sí (tema.spec.ts) */
+.lume-alerta a,
+.lume-alerta :is(.lume-boton--outline, .lume-boton--sutil) {
+  color: var(--lume-blue);
+}
+/* Reflow a 360 px y a 400 % (1.4.10): en celular el texto de botones e insignias puede partir en varias líneas */
+.lume-boton,
+.lume-insignia {
+  max-width: 100%;
+}
+@media (max-width: 47.99em) {
+  .lume-boton,
+  .lume-insignia {
+    white-space: normal;
+    text-align: center;
+  }
+}
+/* Tabla con desplazamiento horizontal: se puede enfocar para desplazarla con el teclado (tabla-adaptable.ts) */
+.tabla-adaptable[tabindex='0']:focus-visible {
+  outline: 2px solid var(--lume-blue-active);
+  outline-offset: 2px;
+}
+/* Modo de alto contraste de Windows: se conservan el punto de la insignia, su borde y la marca del campo con error */
+@media (forced-colors: active) {
+  .lume-insignia {
+    border: 1px solid CanvasText;
+  }
+  .lume-insignia::before {
+    background: CanvasText;
+    forced-color-adjust: none;
+  }
+  .lume-entrada[aria-invalid='true'] {
+    border-width: 2px;
+  }
+  .lume-alerta {
+    border-width: 2px;
+  }
+}
+.lume-modal--centrado {
+  text-align: center;
+}
