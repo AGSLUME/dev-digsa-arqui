@@ -45,6 +45,12 @@ class ConvertidorJwtTest {
     }
 
     @Test
+    void losAlcancesEnListaComoLosEmiteElServidorDeAutorizacionTambienCuentan() {
+        var a = convertidor.convert(token().claim("scope", List.of("seguridad:sesiones", "hola:humo")).build());
+        assertThat(autoridades(a)).containsExactlyInAnyOrder("SCOPE_seguridad:sesiones", "SCOPE_hola:humo");
+    }
+
+    @Test
     void ignoraValoresVacios() {
         var a = convertidor.convert(token().claim("perfiles", List.of(" ", "")).claim("scope", " ").build());
         assertThat(a.getAuthorities()).isEmpty();
