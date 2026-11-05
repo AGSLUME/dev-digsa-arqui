@@ -1,0 +1,14 @@
+# Plantilla: el contenedor reemplaza *_PUERTO con los del .env de la sesión. Los servicios corren en el host.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: lume
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:GATEWAY_PUERTO"]
+        labels: {servicio: gateway}
+      - targets: ["host.docker.internal:SEGURIDAD_PUERTO"]
+        labels: {servicio: seguridad}
+      - targets: ["host.docker.internal:HOLA_PUERTO"]
+        labels: {servicio: hola}

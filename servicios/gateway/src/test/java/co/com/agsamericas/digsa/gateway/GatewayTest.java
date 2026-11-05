@@ -6,7 +6,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.testcontainers.containers.GenericContainer;
@@ -17,15 +18,25 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "LUME_GATEWAY_SECRETO=gateway-solo-prueba",
-        "spring.data.redis.username=",
-        "spring.data.redis.password="})
+        "REDIS_CLAVE_GATEWAY=" + GatewayTest.CLAVE_REDIS})
 class GatewayTest {
 
-    /** Misma imagen y digest que infra/docker-compose.yml (ADR-012). */
+    /** Valor solo de prueba (ficticio). */
+    static final String CLAVE_REDIS = "redis-solo-prueba";
+
+    /** Misma imagen, digest y ACL que infra/docker-compose.yml (ADR-009, ADR-012): la sesión debe caber en "lume:*". */
     @Container
-    @ServiceConnection(name = "redis")
     static final GenericContainer<?> REDIS = new GenericContainer<>(
-            "redis:8.10.3@sha256:f245f4c83b84a9e9a0588da1c9456e579455310f0945d5db52cd2ba27f2000cc").withExposedPorts(6379);
+            "redis:8.10.3@sha256:f245f4c83b84a9e9a0588da1c9456e579455310f0945d5db52cd2ba27f2000cc")
+            .withExposedPorts(6379)
+            .withCommand("redis-server", "--save", "", "--appendonly", "no", "--user", "default", "off",
+                    "--user", "gateway", "on", ">" + CLAVE_REDIS, "~lume:*", "&*", "+@all", "-@dangerous", "+info");
+
+    @DynamicPropertySource
+    static void redis(DynamicPropertyRegistry r) {
+        r.add("REDIS_HOST", REDIS::getHost);
+        r.add("REDIS_PUERTO", () -> REDIS.getMappedPort(6379));
+    }
 
     @Value("${local.server.port}")
     int puerto;

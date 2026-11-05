@@ -40,6 +40,12 @@ class EmisorTest {
     }
 
     @Test
+    void laSaludEsPublicaYElRestoPideIngreso() throws Exception {
+        mvc.perform(get("/actuator/health/readiness")).andExpect(status().isOk());
+        mvc.perform(get("/cualquier-cosa").accept(MediaType.TEXT_HTML)).andExpect(status().is3xxRedirection());
+    }
+
+    @Test
     void elEmisorEsLaUrlPublicaDelGateway() throws Exception {
         mvc.perform(get("/.well-known/openid-configuration"))
                 .andExpect(status().isOk())

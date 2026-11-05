@@ -6,6 +6,8 @@ server:
   forward-headers-strategy: framework
   servlet:
     session:
+      # Nunca el id de sesión en la URL (;LUME_IDP=...): solo por cookie.
+      tracking-modes: cookie
       cookie:
         # Distinto del de gateway: las cookies se separan por host, no por puerto.
         name: LUME_IDP

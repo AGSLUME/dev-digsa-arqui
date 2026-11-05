@@ -1,0 +1,121 @@
+# Infraestructura local de LUME (ADR-005, 006, 009, 010, 012).
+# Siempre con nombre de proyecto propio y el .env de la sesión:
+#   docker compose -p digsa-arqui-<sesion> --env-file infra/.env -f infra/docker-compose.yml up -d
+#   (observabilidad: añadir --profile obs)
+# Todo se publica solo en 127.0.0.1. Imágenes oficiales o de editor verificado, con etiqueta exacta y digest.
+# Los servicios Spring corren en el host durante las oleadas (mvnw spring-boot:run); sus imágenes llegan en el cierre (I9).
+
+name: digsa-arqui-${LUME_SESION:?Falta LUME_SESION en el .env}
+
+services:
+  postgres:
+    image: postgres:16.15@sha256:933463a6c8eba2b9f5cd414138738cd8d5519cd2c471214c222652f547a66a32
+    environment:
+      POSTGRES_USER: lume_admin
+      POSTGRES_PASSWORD: ${PG_CLAVE_ADMIN:?Falta PG_CLAVE_ADMIN}
+      POSTGRES_DB: lume
+      SEGURIDAD_DB_CLAVE: ${SEGURIDAD_DB_CLAVE:?Falta SEGURIDAD_DB_CLAVE}
+      VISITAS_DB_CLAVE: ${VISITAS_DB_CLAVE:?Falta VISITAS_DB_CLAVE}
+      REPORTES_DB_CLAVE: ${REPORTES_DB_CLAVE:?Falta REPORTES_DB_CLAVE}
+      NOTIFICACIONES_DB_CLAVE: ${NOTIFICACIONES_DB_CLAVE:?Falta NOTIFICACIONES_DB_CLAVE}
+      TZ: America/Bogota
+    ports:
+      - "127.0.0.1:${PG_PUERTO:?Falta PG_PUERTO}:5432"
+    volumes:
+      - postgres-datos:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lume_admin -d lume"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4.3.7-management@sha256:6e51f8f18e055d6dc3d94316db0073da64d811c2e19744661fae06b03c1d6fa8
+    hostname: rabbitmq-${LUME_SESION}
+    environment:
+      RABBITMQ_DEFAULT_USER: lume_admin
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_CLAVE_ADMIN:?Falta RABBITMQ_CLAVE_ADMIN}
+    ports:
+      - "127.0.0.1:${RABBITMQ_PUERTO:?Falta RABBITMQ_PUERTO}:5672"
+      - "127.0.0.1:${RABBITMQ_CONSOLA_PUERTO:?Falta RABBITMQ_CONSOLA_PUERTO}:15672"
+    volumes:
+      - rabbitmq-datos:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # Sesión del BFF (guarda tokens): sin persistencia en disco, usuario "default" apagado y un usuario ACL para el gateway (ADR-009).
+  redis:
+    image: redis:8.10.3@sha256:f245f4c83b84a9e9a0588da1c9456e579455310f0945d5db52cd2ba27f2000cc
+    environment:
+      REDIS_CLAVE_GATEWAY: ${REDIS_CLAVE_GATEWAY:?Falta REDIS_CLAVE_GATEWAY}
+    command:
+      - sh
+      - -c
+      - >-
+        exec redis-server --save "" --appendonly no
+        --user default off
+        --user gateway on ">$${REDIS_CLAVE_GATEWAY}" "~lume:*" "&*" "+@all" "-@dangerous" "+info"
+    ports:
+      - "127.0.0.1:${REDIS_PUERTO:?Falta REDIS_PUERTO}:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --user gateway --pass \"$$REDIS_CLAVE_GATEWAY\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # --- Observabilidad básica (perfil opcional "obs") ---
+  # PENDIENTE DE APROBACIÓN DEL USUARIO: prom/prometheus y openzipkin/zipkin los publican los propios proyectos, pero en Docker Hub no
+  # figuran como "Docker Official Image" ni como editor verificado. No se descargan hasta que el usuario lo decida.
+  prometheus:
+    profiles: ["obs"]
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+    environment:
+      GATEWAY_PUERTO: ${GATEWAY_PUERTO}
+      SEGURIDAD_PUERTO: ${SEGURIDAD_PUERTO}
+      HOLA_PUERTO: ${HOLA_PUERTO}
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        sed -e "s/GATEWAY_PUERTO/$${GATEWAY_PUERTO}/; s/SEGURIDAD_PUERTO/$${SEGURIDAD_PUERTO}/; s/HOLA_PUERTO/$${HOLA_PUERTO}/"
+        /etc/prometheus/plantilla.yml > /tmp/prometheus.yml &&
+        exec /bin/prometheus --config.file=/tmp/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=2d
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PUERTO:?Falta PROMETHEUS_PUERTO}:9090"
+    volumes:
+      - ./observabilidad/prometheus.yml:/etc/prometheus/plantilla.yml:ro
+
+  grafana:
+    profiles: ["obs"]
+    image: grafana/grafana:13.2.5@sha256:9f7aa1e1e3246aade5792d35a738049f7f32f89cd51d1956cf426a4e86268a84
+    environment:
+      GF_SECURITY_ADMIN_USER: lume_admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_CLAVE_ADMIN:?Falta GRAFANA_CLAVE_ADMIN}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    ports:
+      - "127.0.0.1:${GRAFANA_PUERTO:?Falta GRAFANA_PUERTO}:3000"
+    volumes:
+      - ./observabilidad/grafana-fuentes.yml:/etc/grafana/provisioning/datasources/lume.yml:ro
+    depends_on:
+      - prometheus
+
+  zipkin:
+    profiles: ["obs"]
+    image: openzipkin/zipkin:3.6.1@sha256:d17e856dcbba7ffeefbbfc252f89ab78a4ab6faed47e646d46daad78f91b5ee2
+    ports:
+      - "127.0.0.1:${ZIPKIN_PUERTO:?Falta ZIPKIN_PUERTO}:9411"
+
+volumes:
+  postgres-datos:
+  rabbitmq-datos:

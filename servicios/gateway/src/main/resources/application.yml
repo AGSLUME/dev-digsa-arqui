@@ -17,8 +17,10 @@ spring:
   session:
     # Inactividad provisional; en S1/S2 el gateway la toma del parámetro de seguridad (ADR-004).
     timeout: ${LUME_MINUTOS_SESION:15}m
-    redis:
-      namespace: lume:gateway:sesion
+    data:
+      redis:
+        # Debe quedar bajo "lume:*": es el único prefijo que la ACL de Redis permite al usuario gateway (ADR-009).
+        namespace: lume:gateway:sesion
   security:
     oauth2:
       client:
@@ -43,6 +45,9 @@ spring:
     gateway:
       server:
         webflux:
+          # Solo se añaden X-Forwarded-* (que el emisor usa para armar URLs con el host público) si la petición llega de un proxy
+          # confiable. En local es el propio equipo; en el cierre, solo el ingress (ADR-003: la IP del cliente no se falsifica).
+          trusted-proxies: ${LUME_PROXIES_CONFIABLES:127\.0\.0\.1|0:0:0:0:0:0:0:1}
           routes:
             # Emisor OIDC (seguridad). Va sin TokenRelay: el navegador inicia sesión allí.
             - id: seguridad-emisor
