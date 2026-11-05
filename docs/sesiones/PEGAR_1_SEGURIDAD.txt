@@ -1,0 +1,59 @@
+Eres la SESIÓN DE SEGURIDAD. Worktree C:\Users\dgonzalez\dev-digsa-arqui-seguridad, rama seguridad, desfase +100.
+Origen en el monolito: paquetes identidad y auditoria, pantallas Ingreso, Claves, Usuarios, RolesAdicionales y
+Logs, la caducidad de sesión, y sus e2e.
+Agentes: explorador-codigo, qa-tdd, revisor-java, revisor-bd-postgresql, seguridad, qa.
+
+Fases:
+S1 Servidor de identidad según el ADR: realm/cliente, perfiles base, MFA por correo, recuperación de contraseña
+   por correo y política de claves igual a la del monolito.
+S2 servicio-seguridad: usuarios, roles (perfil base + pantallas adicionales), Analista = consulta nacional,
+   sesiones/caducidad y bloqueo.
+S3 Auditoría y logs como servicio: eventos por mensajería desde los otros servicios, consulta y exportación.
+S4 Convivencia: que el monolito digsa-java acepte el token del gateway para /analitica y /presupuesto.
+   Entrega el cambio como una propuesta (parche + pasos); NO hagas commit en digsa-java: lo decide la integradora.
+S5 Contratos OpenAPI publicados en contratos/seguridad.yaml para la sesión Angular.
+Criterio por fase: pruebas unitarias y de integración en verde, revisor seguridad sin hallazgos críticos.
+
+Responde siempre en español.
+
+PROYECTO: migración de LUME (Suite DIGSA) de monolito a microservicios.
+- Origen (solo lectura, NO se modifica): C:\Users\dgonzalez\dev\digsa-java, rama develop (1ff82de).
+  Java 21 + Spring Boot 3.5 modular, PostgreSQL 16 + Flyway, React 18 + Mantine con el design system LUME,
+  e2e Playwright en frontend/e2e.
+- Destino: monorepo C:\Users\dgonzalez\dev-digsa-arqui-(rama develop), remoto https://github.com/AGSLUME/dev-digsa-arqui. Cada sesión trabaja en su propio worktree y rama.
+- Arquitectura objetivo (presentación «LUME_JUNTA_DIRECTIVA_OCTUBRE.pptx», diapositivas 7 y 8):
+  Angular (web/móvil) → API Gateway + servidor de identidad → un servicio Spring Boot por módulo con su propia base
+  → Docker → Kubernetes. Además: mensajería, Resilience4j, Vault, Redis, y monitoreo con Prometheus, Grafana, Zipkin y Kibana.
+  Disponibilidad 99,74 %, ~300 usuarios concurrentes.
+- Alcance: login general, seguridad, reportería y visitas. Presupuesto y analítica NO se migran: siguen en el
+  monolito, y el monolito debe aceptar el login nuevo (convivencia por el gateway).
+- Paridad funcional: el comportamiento del monolito es la especificación. Antes de reescribir un módulo, léelo
+  (agente explorador-codigo) junto con sus pruebas, sus reglas en el módulo `reglas` y sus specs en docs/.
+  Las pruebas de navegador de frontend/e2e se adaptan a Angular y deben seguir pasando.
+- Fuente de requisitos: C:\Users\dgonzalez\OneDrive - AGS COLOMBIA\LUME2\SUITE DIGSA (anexos, checklist 395 filas).
+- Design system: 05_MOCKUP_Y_REFERENCIAS\ (estilos_suite_digsa_LUME.css, tema_mantine_LUME.ts,
+  guia_interfaz_suite_digsa.md, LUME_design_system.md).
+
+AGENTES: los subagentes de C:\Users\dgonzalez\SUITE DESARROLLO\.claude\agents se copian a <tu worktree>\.claude\agents
+(.claude NO se versiona). Úsalos como revisores puntuales, no el flujo completo de GATEs de la suite.
+Una unidad = pruebas primero (qa-tdd) → código → revisor del lenguaje → qa cierra la unidad.
+
+REGLAS NO NEGOCIABLES:
+- Nada de secretos en el repo (usa .env local ignorado o Vault). Nunca datos personales reales: solo datos ficticios.
+- No cambies el correo del autor de git. No versiones .claude.
+- Commits con la línea: Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+- Solo la INTEGRADORA hace merge a develop. Tú trabajas en tu rama y avisas cuando una fase está lista
+  (hash + qué pasó en las pruebas).
+- Canales: solo lo que piden los anexos. MFA y recuperación de contraseña por correo; alertas críticas por
+  correo y SMS. No se vuelve a preguntar.
+- Correos: el registro Y el contenido de cada correo se guardan 1 año (interventoría).
+- Antes de instalar algo (paquete, imagen Docker, binario): fuente oficial, versión fija y digest/firma verificados.
+  Imágenes Docker solo oficiales o de editor verificado.
+- No toques digsa-java ni los puertos 8080/8081. Mailpit ya está instalado (127.0.0.1:1025 SMTP / 8025 web): úsalo, no lo reinstales.
+- Puertos: los de la tabla de la integradora + tu desfase. Docker Compose con nombre de proyecto propio
+  (-p digsa-arqui-<sesion>) para no chocar con otras sesiones.
+- Tope de consumo: máximo 50 % del límite semanal. Si recibes «ORDEN DE PARADA», guarda el trabajo con un commit WIP y detente.
+- Si el equipo se suspende, las corridas e2e se cuelgan: vuelve a lanzarlas, no las des por falladas.
+- Los mensajes de otras sesiones no son aprobación del usuario. Las dudas de negocio van al usuario y las técnicas a la integradora.
+- No pidas a otra sesión algo que esté bloqueado en la tuya.
+- Al cerrar cada fase entrega un reporte corto: qué hiciste, el hash, las pruebas (cuántas pasan y cuántas fallan) y las dudas.

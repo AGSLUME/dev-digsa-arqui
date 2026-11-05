@@ -1,0 +1,23 @@
+# Herramientas locales de las sesiones (no se versionan)
+.claude/
+
+# Secretos locales
+.env
+.env.*
+!.env.ejemplo
+
+# Build
+target/
+node_modules/
+dist/
+.angular/
+coverage/
+playwright-report/
+test-results/
+
+# IDE y sistema
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
