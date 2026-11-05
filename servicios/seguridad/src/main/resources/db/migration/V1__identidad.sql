@@ -123,3 +123,17 @@ CREATE TABLE sesiones (
 ) WITH (fillfactor = 85);                                 -- «ultimo» cambia cada 30 s y no está indexado: actualizaciones HOT
 CREATE UNIQUE INDEX uq_sesiones_abierta ON sesiones (usuario_id) WHERE cerrada IS NULL;
 CREATE INDEX ix_sesiones_usuario_inicio ON sesiones (usuario_id, inicio DESC);
+
+-- ---------- Permisos del rol de la aplicación (D8: el esquema es de seguridad_ddl; la aplicación solo tiene lo que se le concede) ----------
+-- Como el monolito (V2, V8, V30, V31): sin DELETE en usuarios ni en perfiles; los perfiles solo se renombran o se activan/inactivan.
+GRANT SELECT, INSERT, UPDATE ON usuarios TO ${rol_app};
+GRANT USAGE ON SEQUENCE usuarios_id_seq TO ${rol_app};
+GRANT SELECT, INSERT ON perfiles TO ${rol_app};
+GRANT UPDATE (nombre, descripcion, activo) ON perfiles TO ${rol_app};
+GRANT USAGE ON SEQUENCE perfiles_adicionales_id_seq TO ${rol_app};
+GRANT SELECT, INSERT, DELETE ON perfiles_pantallas TO ${rol_app};
+GRANT SELECT, INSERT, DELETE ON usuarios_perfiles TO ${rol_app};
+GRANT SELECT, INSERT, UPDATE, DELETE ON mfa_codigos TO ${rol_app};          -- DELETE: purga de códigos vencidos
+GRANT USAGE ON SEQUENCE mfa_codigos_id_seq TO ${rol_app};
+GRANT SELECT, INSERT, UPDATE ON seg_parametros TO ${rol_app};
+GRANT SELECT, INSERT, UPDATE ON sesiones TO ${rol_app};

@@ -52,8 +52,14 @@ spring:
       schema: seguridad
       maximum-pool-size: ${SEGURIDAD_DB_POOL:10}
   flyway:
+    # D8: Flyway con el dueño del esquema (DDL); la aplicación con el rol «seguridad», que solo tiene los GRANT de cada migración.
+    user: ${SEGURIDAD_DB_USUARIO_DDL:seguridad_ddl}
+    password: ${SEGURIDAD_DB_CLAVE_DDL:}
     schemas: seguridad
     default-schema: seguridad
+    create-schemas: false
+    placeholders:
+      rol_app: ${SEGURIDAD_DB_USUARIO:seguridad}
   session:
     # La sesión del emisor solo vive mientras dura el ingreso (paso 1 → código → autorización). Se invalida al emitir el código OIDC:
     # después, la sesión es la del gateway (LUME_SESION) y el ingreso siguiente vuelve a pedir usuario, contraseña y código.

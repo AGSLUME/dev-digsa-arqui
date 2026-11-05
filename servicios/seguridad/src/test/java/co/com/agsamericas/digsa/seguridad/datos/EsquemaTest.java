@@ -28,7 +28,10 @@ class EsquemaTest extends PruebaIntegracion {
     }
 
     @Test
-    void elEsquemaEsSeguridadYNoPublic() {
+    void laAplicacionUsaSuRolSinDdlYElEsquemaEsSeguridad() {
+        assertThat(jdbc.sql("SELECT current_user").query(String.class).single()).isEqualTo("seguridad");
+        assertThatThrownBy(() -> jdbc.sql("CREATE TABLE intrusa (id int)").update()).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThatThrownBy(() -> jdbc.sql("DELETE FROM usuarios WHERE id = -1").update()).isInstanceOf(org.springframework.dao.DataAccessException.class);
         assertThat(jdbc.sql("SELECT current_schema()").query(String.class).single()).isEqualTo("seguridad");
         assertThat(jdbc.sql("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'seguridad' AND table_name = 'usuarios'")
                 .query(Long.class).single()).isEqualTo(1L);

@@ -14,3 +14,7 @@ CREATE TABLE correos_registro (
     error         text                                      -- la aplicación lo corta a 500: un CHECK aquí ocultaría el fallo original
 );
 CREATE INDEX ix_correos_registro_creado ON correos_registro (creado);
+
+-- Permisos del rol de la aplicación (D8): registra y purga; nunca modifica un registro.
+GRANT SELECT, INSERT, DELETE ON correos_registro TO ${rol_app};
+GRANT USAGE ON SEQUENCE correos_registro_id_seq TO ${rol_app};

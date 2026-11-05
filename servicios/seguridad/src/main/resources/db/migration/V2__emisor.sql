@@ -91,3 +91,8 @@ CREATE TABLE spring_session_attributes (
     CONSTRAINT spring_session_attributes_pk PRIMARY KEY (session_primary_id, attribute_name),
     CONSTRAINT spring_session_attributes_fk FOREIGN KEY (session_primary_id) REFERENCES spring_session (primary_id) ON DELETE CASCADE
 );
+
+-- ---------- Permisos del rol de la aplicación (D8) ----------
+GRANT SELECT, INSERT, UPDATE, DELETE ON oauth2_authorization TO ${rol_app};
+GRANT SELECT, INSERT, UPDATE, DELETE ON jwk TO ${rol_app};
+GRANT SELECT, INSERT, UPDATE, DELETE ON spring_session, spring_session_attributes TO ${rol_app};
