@@ -41,7 +41,7 @@ jobs:
           done
 
   frontend:
-    name: Frontend (ng build + ng test)
+    name: Frontend (cliente generado + ng build + ng test)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
@@ -56,11 +56,70 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      # Java para generar el cliente desde contratos/ (openapi-generator 7.26.0, el mismo del pom; ADR-007)
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "21"
       - name: Instalar (lockfile exacto)
         run: npm ci --no-audit --no-fund
       - name: Auditoría de dependencias de producción (aviso)
         run: npm audit --omit=dev || true
+      - name: Cliente generado desde contratos/ (verifica el SHA-1 del generador)
+        run: npm run api
       - name: Build
         run: npx ng build
       - name: Pruebas
         run: npx ng test --watch=false
+
+  e2e:
+    name: E2E (Playwright · chromium, firefox, webkit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      MAILPIT_VERSION: v1.31.6
+      # SHA-256 de mailpit-linux-amd64.tar.gz v1.31.6: digest de la release oficial en GitHub, verificado al fijarlo (ADR-012)
+      MAILPIT_SHA256: 10fa12ccc610f653d4ed4df848c1817f9935dcf4e9a6a458a19ab0fa02093f91
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/package-lock.json
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Instalar el frontend y generar el cliente
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run api
+      - name: Instalar Playwright y sus navegadores (versión fija del lockfile)
+        working-directory: e2e
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium firefox webkit
+      # Mailpit: binario oficial (la imagen Docker no es oficial ni de editor verificado), versión fija y SHA-256 verificado
+      - name: Mailpit (correo de prueba en 127.0.0.1:1025 / 8025)
+        run: |
+          curl -fsSL -o /tmp/mailpit.tar.gz "https://github.com/axllent/mailpit/releases/download/${MAILPIT_VERSION}/mailpit-linux-amd64.tar.gz"
+          echo "${MAILPIT_SHA256}  /tmp/mailpit.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/mailpit.tar.gz -C /tmp mailpit
+          nohup /tmp/mailpit --smtp 127.0.0.1:1025 --listen 127.0.0.1:8025 > /tmp/mailpit.log 2>&1 &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8025/api/v1/info > /dev/null && break; sleep 1; done
+      - name: E2E (mock de seguridad + ng serve)
+        working-directory: e2e
+        run: npx playwright test
+      - name: Resumen de las e2e
+        if: always()
+        working-directory: e2e
+        run: |
+          [ -f test-results/junit.xml ] || exit 0
+          grep -o '<testsuites[^>]*>' test-results/junit.xml | sed 's/^/e2e: /' >> "$GITHUB_STEP_SUMMARY"
