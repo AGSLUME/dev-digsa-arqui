@@ -174,10 +174,35 @@ class TokensTest extends PruebaIntegracion {
         n.navegar(AUTORIZAR.replace(RETORNO, "https://otro.sitio.example/cb")).andExpect(status().is4xxClientError());
     }
 
+    @Test
+    @DisplayName("B6: tras un ingreso completo y el cierre de la sesión (inactividad), una autorización nueva con el mismo navegador "
+            + "vuelve a /ingreso y nunca emite un código sin clave y MFA (equipo compartido)")
+    void laSesionDelEmisorNoSobreviveALaDeLume() throws Exception {
+        var u = datos.usuario();
+        Navegador n = navegador();
+        Tokens t = ingresarYCanjear(u, n);
+        // 1) Aun con la sesión de LUME abierta, la cookie LUME_IDP ya no autoriza: se invalidó al emitir el código
+        String inmediata = n.navegar(AUTORIZAR).andExpect(status().isFound()).andReturn().getResponse().getRedirectedUrl();
+        assertThat(inmediata).endsWith("/ingreso").doesNotContain("code=");
+        // 2) El gateway cierra por inactividad: tampoco hay código, y el refresh token deja de servir
+        contexto.getBean(co.com.agsamericas.digsa.seguridad.identidad.ServicioEstadoSesion.class)
+                .cerrarPorGateway(UUID.fromString((String) claims(t.acceso()).get("sid")), RepositorioSesiones.Motivo.INACTIVIDAD);
+        String despues = n.navegar(AUTORIZAR).andExpect(status().isFound()).andReturn().getResponse().getRedirectedUrl();
+        assertThat(despues).endsWith("/ingreso").doesNotContain("code=");
+        refrescar(t.refresco(), 400);
+        // 3) Volver a entrar exige otra vez usuario, contraseña y un código nuevo
+        int antes = correos.a(u.correo()).size();
+        ingresarYCanjear(u, n);
+        assertThat(correos.a(u.correo())).hasSize(antes + 1);
+    }
+
     // ---------- auxiliares ----------
 
     private Tokens ingresarYCanjear(DatosPrueba.Ficticio u) throws Exception {
-        Navegador n = navegador();
+        return ingresarYCanjear(u, navegador());
+    }
+
+    private Tokens ingresarYCanjear(DatosPrueba.Ficticio u, Navegador n) throws Exception {
         n.navegar(AUTORIZAR).andExpect(status().isFound());
         n.post("/api/auth/ingreso", Map.of("usuario", u.usuario(), "clave", DatosPrueba.CLAVE)).andExpect(status().isOk());
         String continuar = Navegador.campo(n.post("/api/auth/codigo", Map.of("codigo", correos.ultimoCodigo(u.correo())))

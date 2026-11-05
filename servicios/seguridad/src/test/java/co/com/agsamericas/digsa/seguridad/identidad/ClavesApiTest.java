@@ -151,7 +151,7 @@ class ClavesApiTest extends PruebaIntegracion {
         olvide(tercero, u.correo()).andExpect(status().isOk()).andExpect(jsonPath("$.mensaje").value(MENSAJE_OLVIDE));
         Thread.sleep(500);
         assertThat(correos.a(u.correo())).as("no se envía otro antes de 5 minutos").hasSize(1);
-        tercero.get("/api/auth/clave?tkn=" + primero).andExpect(jsonPath("$.valido").value(true));
+        tercero.post("/api/auth/clave/consultar", Map.of("tkn", primero)).andExpect(jsonPath("$.valido").value(true));
 
         reloj.avanzar(Duration.ofMinutes(5).plusSeconds(1));
         olvide(tercero, u.usuario());
@@ -166,21 +166,21 @@ class ClavesApiTest extends PruebaIntegracion {
     void consultarEnlaceVigenteDevuelveElNombre() throws Exception {
         var u = datos.usuario();
         String tkn = pedirEnlace(u);
-        navegador().get("/api/auth/clave?tkn=" + tkn).andExpect(status().isOk())
+        navegador().post("/api/auth/clave/consultar", Map.of("tkn", tkn)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.valido").value(true)).andExpect(jsonPath("$.nombre").value(u.nombre()));
     }
 
     @Test
     @DisplayName("contrato: GET clave con un enlace que no existe responde 200 valido=false con el mensaje del contrato")
     void consultarEnlaceInexistenteEsInvalido() throws Exception {
-        navegador().get("/api/auth/clave?tkn=" + "a".repeat(64)).andExpect(status().isOk())
+        navegador().post("/api/auth/clave/consultar", Map.of("tkn", "a".repeat(64))).andExpect(status().isOk())
                 .andExpect(jsonPath("$.valido").value(false)).andExpect(jsonPath("$.mensaje").value(ENLACE_INVALIDO));
     }
 
     @Test
     @DisplayName("contrato: GET clave con un token mal formado (no hexadecimal) responde 200 valido=false")
     void consultarEnlaceMalFormadoEsInvalido() throws Exception {
-        navegador().get("/api/auth/clave?tkn=no-es-hexadecimal").andExpect(status().isOk())
+        navegador().post("/api/auth/clave/consultar", Map.of("tkn", "no-es-hexadecimal")).andExpect(status().isOk())
                 .andExpect(jsonPath("$.valido").value(false));
     }
 
@@ -190,9 +190,9 @@ class ClavesApiTest extends PruebaIntegracion {
         var u = datos.usuario();
         String tkn = pedirEnlace(u);
         reloj.avanzar(Duration.ofMinutes(59));
-        navegador().get("/api/auth/clave?tkn=" + tkn).andExpect(jsonPath("$.valido").value(true));
+        navegador().post("/api/auth/clave/consultar", Map.of("tkn", tkn)).andExpect(jsonPath("$.valido").value(true));
         reloj.avanzar(Duration.ofMinutes(2));
-        navegador().get("/api/auth/clave?tkn=" + tkn).andExpect(jsonPath("$.valido").value(false));
+        navegador().post("/api/auth/clave/consultar", Map.of("tkn", tkn)).andExpect(jsonPath("$.valido").value(false));
         definir(navegador(), tkn, NUEVA, NUEVA).andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.mensaje").value(ENLACE_INVALIDO));
     }
@@ -217,7 +217,7 @@ class ClavesApiTest extends PruebaIntegracion {
         Navegador n = navegador();
         definir(n, tkn, NUEVA, NUEVA).andExpect(status().isOk())
                 .andExpect(jsonPath("$.mensaje").value("La contraseña se cambió correctamente. Inicie sesión con su nueva contraseña."));
-        n.get("/api/auth/clave?tkn=" + tkn).andExpect(jsonPath("$.valido").value(false));
+        n.post("/api/auth/clave/consultar", Map.of("tkn", tkn)).andExpect(jsonPath("$.valido").value(false));
         definir(n, tkn, "Otra.Clave.2026!", "Otra.Clave.2026!").andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.mensaje").value(ENLACE_INVALIDO));
         n.post("/api/auth/ingreso", Map.of("usuario", u.usuario(), "clave", DatosPrueba.CLAVE)).andExpect(status().isUnauthorized());
@@ -238,7 +238,7 @@ class ClavesApiTest extends PruebaIntegracion {
         definir(n, tkn, NUEVA, "Otra.Cosa.2026").andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.mensaje").value("Las contraseñas no coinciden."));
         definir(n, tkn, "", "").andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.mensaje").value("Escriba la contraseña."));
-        n.get("/api/auth/clave?tkn=" + tkn).andExpect(jsonPath("$.valido").value(true));
+        n.post("/api/auth/clave/consultar", Map.of("tkn", tkn)).andExpect(jsonPath("$.valido").value(true));
     }
 
     @ParameterizedTest(name = "[{index}] {0}")
@@ -305,7 +305,7 @@ class ClavesApiTest extends PruebaIntegracion {
         var u = datos.usuario();
         String tkn = pedirEnlace(u);
         jdbc.sql("UPDATE usuarios SET activo = false WHERE id = :u").param("u", u.id()).update();
-        navegador().get("/api/auth/clave?tkn=" + tkn).andExpect(jsonPath("$.valido").value(false));
+        navegador().post("/api/auth/clave/consultar", Map.of("tkn", tkn)).andExpect(jsonPath("$.valido").value(false));
         definir(navegador(), tkn, NUEVA, NUEVA).andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.mensaje").value(ENLACE_INVALIDO));
     }

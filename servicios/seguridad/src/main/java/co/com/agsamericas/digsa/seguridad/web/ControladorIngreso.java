@@ -4,6 +4,7 @@ import co.com.agsamericas.digsa.comun.errores.ErrorNegocio;
 import co.com.agsamericas.digsa.seguridad.api.IngresoApi;
 import co.com.agsamericas.digsa.seguridad.api.modelo.CambioInicial;
 import co.com.agsamericas.digsa.seguridad.api.modelo.Codigo;
+import co.com.agsamericas.digsa.seguridad.api.modelo.ConsultaEnlace;
 import co.com.agsamericas.digsa.seguridad.api.modelo.EnlaceClave;
 import co.com.agsamericas.digsa.seguridad.api.modelo.Ingreso;
 import co.com.agsamericas.digsa.seguridad.api.modelo.IngresoCompleto;
@@ -86,7 +87,9 @@ class ControladorIngreso implements IngresoApi {
     }
 
     @Override
-    public ResponseEntity<EnlaceClave> consultarEnlace(String tkn) {
+    public ResponseEntity<EnlaceClave> consultarEnlace(ConsultaEnlace c) {
+        // El token va en el cuerpo (no en la URL): no queda en registros de acceso. Mal formado o ausente = enlace no válido.
+        String tkn = c == null ? null : c.getTkn();
         return ResponseEntity.ok(claves.usuarioDelEnlace(tkn)
                 .map(u -> new EnlaceClave(true).nombre(u.nombre()))
                 .orElseGet(() -> new EnlaceClave(false)

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: LUME · seguridad
-  version: 0.2.0
+  version: 0.3.0
   description: |
     API del servicio `seguridad` (ADR-002, ADR-004, ADR-014), tal como la ve la SPA **a través del gateway** (mismo origen).
 
@@ -16,6 +16,8 @@ info:
     4. El monolito agregaba « (local: <código>)» al mensaje y llenaba `enlaceLocal` en local con correo a archivo. Aquí el correo
        local va a Mailpit, así que el mensaje nunca lleva el código y `enlaceLocal` siempre es `null`.
     5. 429 por límite de tasa del gateway en `/api/auth/**`, por IP y por usuario (ADR-003). Es nuevo.
+    6. La consulta del enlace es `POST /api/auth/clave/consultar` con `{tkn}` en el cuerpo (el monolito: `GET /api/auth/clave?tkn=`): el
+       token no queda en registros de acceso.
 
     **Flujo de ingreso (ADR-014).** Sin sesión, la SPA navega (página completa) a `/bff/oauth2/authorization/lume`. El emisor redirige
     a `/ingreso` (pantalla Angular), que usa estas rutas. Cuando `POST /api/auth/codigo` responde 200, la SPA hace
@@ -317,21 +319,22 @@ paths:
                 $ref: '#/components/schemas/Problema'
         '429':
           $ref: '#/components/responses/DemasiadasPeticiones'
-  /api/auth/clave:
-    get:
+  /api/auth/clave/consultar:
+    post:
       tags: [ingreso]
       operationId: consultarEnlace
       summary: Validar el enlace para definir la contraseña
-      description: Siempre 200. Si el enlace no sirve, `valido=false` con el mensaje.
+      description: |
+        Siempre 200. Si el enlace no sirve, `valido=false` con el mensaje. **Diferencia con el monolito** (`GET /api/auth/clave?tkn=`):
+        el token va en el cuerpo y no en la URL, para que no quede en los registros de acceso de ningún equipo intermedio (integradora,
+        2026-11-05). La pantalla `/definir-clave?tkn=` no cambia: la SPA lee el token y lo quita de la URL.
       security: []
-      parameters:
-        - name: tkn
-          in: query
-          required: true
-          description: Token del enlace (64 caracteres hexadecimales). En la base solo se guarda su SHA-256.
-          schema:
-            type: string
-            maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsultaEnlace'
       responses:
         '200':
           description: |
@@ -343,6 +346,11 @@ paths:
                 $ref: '#/components/schemas/EnlaceClave'
         '400':
           $ref: '#/components/responses/FormatoInvalido'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+  /api/auth/clave:
     post:
       tags: [ingreso]
       operationId: definirClave
@@ -723,6 +731,14 @@ components:
           description: Usuario o correo.
         captcha:
           type: [string, 'null']
+    ConsultaEnlace:
+      type: object
+      required: [tkn]
+      properties:
+        tkn:
+          type: string
+          maxLength: 64
+          description: Token del enlace (64 caracteres hexadecimales). En la base solo se guarda su SHA-256.
     EnlaceClave:
       type: object
       required: [valido]
