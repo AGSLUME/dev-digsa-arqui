@@ -1,5 +1,8 @@
 # Solo en local (SPRING_PROFILES_ACTIVE=local, lo pone infra/arrancar.sh). Nunca en otro entorno.
 lume:
+  contrasenas:
+    # El secreto del cliente gateway que genera infra/generar-env.sh va como {noop}: solo se reconoce en local.
+    permitir-noop: true
   captcha:
     # Sin claves de Turnstile, el captcha se da por superado (como el monolito en local). Con las claves de prueba públicas de Cloudflare
     # en el .env (LUME_TURNSTILE_*), se verifica de verdad.
@@ -20,6 +23,6 @@ spring:
               client-secret: ${LUME_HUMO_SECRETO_CODIFICADO}
               client-authentication-methods: client_secret_basic
               authorization-grant-types: client_credentials
-              scopes: lume.humo
+              scopes: hola:humo
             token:
               access-token-time-to-live: 5m

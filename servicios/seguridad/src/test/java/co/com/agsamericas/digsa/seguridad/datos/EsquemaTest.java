@@ -52,10 +52,16 @@ class EsquemaTest extends PruebaIntegracion {
 
     @Test
     void soloHayUnaClaveDeFirmaVigente() {
-        jdbc.sql("INSERT INTO jwk (kid, publica, privada_cifrada, creada) VALUES ('k1', '{}', '\\x00', now())").update();
+        // Puede existir ya la vigente que creó el almacén de claves al emitir un token en otra prueba del mismo contexto
+        boolean puse = jdbc.sql("SELECT count(*) FROM jwk WHERE retirada IS NULL").query(Long.class).single() == 0;
+        if (puse) {
+            jdbc.sql("INSERT INTO jwk (kid, publica, privada_cifrada, creada) VALUES ('k1', '{}', '\\x00', now())").update();
+        }
         assertThatThrownBy(() -> jdbc.sql("INSERT INTO jwk (kid, publica, privada_cifrada, creada) VALUES ('k2', '{}', '\\x00', now())")
                 .update()).isInstanceOf(DataIntegrityViolationException.class);
-        jdbc.sql("DELETE FROM jwk WHERE kid = 'k1'").update();
+        if (puse) {
+            jdbc.sql("DELETE FROM jwk WHERE kid = 'k1'").update();
+        }
     }
 
     @Test

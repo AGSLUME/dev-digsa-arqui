@@ -6,7 +6,9 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -118,15 +120,21 @@ class ConfiguracionEmisor {
 
     /**
      * BCrypt de costo 12, como el monolito. Los hash sin prefijo (los migrados del monolito, {@code $2a$...}) se verifican con BCrypt. El
-     * prefijo {@code {noop}} solo existe para el secreto del cliente en local y pruebas (lo genera infra/generar-env.sh); fuera de local el
-     * secreto va como {@code {bcrypt}...}.
+     * prefijo {@code {noop}} solo se reconoce con {@code lume.contrasenas.permitir-noop} (perfiles {@code local} y {@code prueba}, para el
+     * secreto del cliente que genera infra/generar-env.sh); en cualquier otro entorno un hash {@code {noop}...} no coincide nunca, ni de
+     * un cliente ni de un usuario (revisión Java, M3). Fuera de local el secreto del cliente va como {@code {bcrypt}...}.
      */
     @Bean
-    PasswordEncoder codificador() {
+    PasswordEncoder codificador(@Value("${lume.contrasenas.permitir-noop:false}") boolean permitirNoop) {
         BCryptPasswordEncoder bcrypt = new BCryptPasswordEncoder(12);
-        @SuppressWarnings("deprecation")
-        PasswordEncoder noop = NoOpPasswordEncoder.getInstance();
-        DelegatingPasswordEncoder d = new DelegatingPasswordEncoder("bcrypt", Map.of("bcrypt", bcrypt, "noop", noop));
+        Map<String, PasswordEncoder> codificadores = new HashMap<>();
+        codificadores.put("bcrypt", bcrypt);
+        if (permitirNoop) {
+            @SuppressWarnings("deprecation")
+            PasswordEncoder noop = NoOpPasswordEncoder.getInstance();
+            codificadores.put("noop", noop);
+        }
+        DelegatingPasswordEncoder d = new DelegatingPasswordEncoder("bcrypt", codificadores);
         d.setDefaultPasswordEncoderForMatches(bcrypt);
         return d;
     }

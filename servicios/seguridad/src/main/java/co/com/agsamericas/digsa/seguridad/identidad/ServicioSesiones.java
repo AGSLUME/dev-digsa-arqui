@@ -2,7 +2,9 @@ package co.com.agsamericas.digsa.seguridad.identidad;
 
 import co.com.agsamericas.digsa.seguridad.identidad.RepositorioSesiones.Motivo;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -25,6 +27,20 @@ public class ServicioSesiones {
         this.sesiones = sesiones;
         this.jdbc = jdbc;
         this.reloj = reloj;
+    }
+
+    /**
+     * Abre la sesión del usuario (decisión 7.1). Con la fila del usuario bloqueada: cierra por inactividad (y revoca) la abierta que ya
+     * superó el plazo y abre la nueva solo si no queda otra abierta.
+     *
+     * @return el {@code sid} nuevo, o vacío si otra sesión sigue abierta y activa
+     */
+    @Transactional
+    public Optional<UUID> abrir(long usuarioId, int minutos, String ip) {
+        Instant ahora = reloj.instant();
+        sesiones.bloquearUsuario(usuarioId);
+        sesiones.cerrarInactivas(usuarioId, ahora, minutos).forEach(this::revocar);
+        return sesiones.insertar(usuarioId, ahora, ip);
     }
 
     /** Cierra una sesión y revoca lo que dependa de ella. @return true si estaba abierta */

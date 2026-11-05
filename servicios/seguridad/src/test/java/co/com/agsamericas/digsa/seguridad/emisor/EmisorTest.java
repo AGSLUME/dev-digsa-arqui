@@ -56,19 +56,20 @@ class EmisorTest {
     }
 
     @Test
-    void clientCredentialsEmiteUnTokenConAudienciaLume() throws Exception {
+    void clientCredentialsEmiteUnTokenConLaAudienciaDelServicioDelAlcance() throws Exception {
         String basico = Base64.getEncoder().encodeToString("humo:humo-solo-prueba".getBytes(StandardCharsets.UTF_8));
         String cuerpo = mvc.perform(post("/oauth2/token")
                         .header(HttpHeaders.AUTHORIZATION, "Basic " + basico)
                         .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                        .content("grant_type=client_credentials&scope=lume.humo"))
+                        .content("grant_type=client_credentials&scope=hola:humo"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         JsonMapper json = JsonMapper.builder().build();
         String token = json.readTree(cuerpo).get("access_token").asString();
         JsonNode claims = json.readTree(Base64.getUrlDecoder().decode(token.split("\\.")[1]));
-        assertThat(claims.get("aud").toString()).contains("lume");
-        assertThat(claims.get("scope").toString()).contains("lume.humo");
+        // Token de máquina: su audiencia es solo el servicio del alcance (hola:humo → hola), nunca la lista de los de usuario
+        assertThat(claims.get("aud").toString()).contains("hola").doesNotContain("gateway", "seguridad", "monolito");
+        assertThat(claims.get("scope").toString()).contains("hola:humo");
         assertThat(claims.has("perfiles")).isFalse();
     }
 

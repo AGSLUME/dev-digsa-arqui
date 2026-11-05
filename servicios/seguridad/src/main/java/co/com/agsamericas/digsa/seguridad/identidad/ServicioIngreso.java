@@ -23,6 +23,7 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.FactorGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -30,6 +31,7 @@ import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.savedrequest.RequestCache;
 import org.springframework.security.web.savedrequest.SavedRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Ingreso en dos pasos (Anexo 5, 3.1 y 3.2), portado de {@code identidad.ServicioIngreso} del monolito: usuario y contraseña con captcha y
@@ -57,6 +59,8 @@ public class ServicioIngreso {
 
     private static final String VERIFICACION_VENCIDA = "La verificación venció. Ingrese de nuevo con su usuario y contraseña.";
     private static final String RUTA_AUTORIZAR = "/oauth2/authorize";
+    /** Clase del bloqueo consultivo por usuario al registrar un código (pg_advisory_xact_lock(clase, usuario)). */
+    private static final int BLOQUEO_MFA = 0x4D4641;
 
     /** Respuesta del paso 1 (y del cambio de clave inicial y del reenvío). */
     public record Paso(String paso, String mensaje, String correo) {
@@ -71,6 +75,8 @@ public class ServicioIngreso {
 
     private final RepositorioUsuarios usuarios;
     private final RepositorioSesiones sesiones;
+    private final ServicioSesiones cierres;
+    private final TransactionTemplate tx;
     private final ServicioClaves claves;
     private final Captcha captcha;
     private final CorreoSeguridad correo;
@@ -85,11 +91,14 @@ public class ServicioIngreso {
     /** Hash de relleno: el tiempo de respuesta no revela si el usuario existe. */
     private final String hashRelleno;
 
-    public ServicioIngreso(RepositorioUsuarios usuarios, RepositorioSesiones sesiones, ServicioClaves claves, Captcha captcha,
+    public ServicioIngreso(RepositorioUsuarios usuarios, RepositorioSesiones sesiones, ServicioSesiones cierres, TransactionTemplate tx,
+                           ServicioClaves claves, Captcha captcha,
                            CorreoSeguridad correo, PasswordEncoder codificador, BitacoraSeguridad bitacora, SecurityContextRepository contextos,
                            RequestCache peticiones, PropiedadesSeguridad cfg, ParametrosSeguridad parametros, JdbcClient jdbc, Clock reloj) {
         this.usuarios = usuarios;
         this.sesiones = sesiones;
+        this.cierres = cierres;
+        this.tx = tx;
         this.claves = claves;
         this.captcha = captcha;
         this.correo = correo;
@@ -119,15 +128,15 @@ public class ServicioIngreso {
         Optional<Usuario> encontrado = usuarios.porUsuario(escrito);
         String motivo = null;
         if (encontrado.isEmpty()) {
-            codificador.matches(clave == null ? "" : clave, hashRelleno);
+            coincide(clave, hashRelleno);
             motivo = "usuario inexistente";
         } else if (!encontrado.get().activo()) {
-            codificador.matches(clave == null ? "" : clave, hashRelleno);
+            coincide(clave, hashRelleno);
             motivo = "usuario inactivo";
         } else if (encontrado.get().bloqueado(ahora)) {
-            codificador.matches(clave == null ? "" : clave, hashRelleno);
+            coincide(clave, hashRelleno);
             motivo = "Intento con el usuario bloqueado";
-        } else if (clave == null || !codificador.matches(clave, encontrado.get().claveHash())) {
+        } else if (!coincide(clave, encontrado.get().claveHash())) {
             if (usuarios.registrarFallo(encontrado.get().id(), ahora, INTENTOS_MAXIMOS, MINUTOS_BLOQUEO)) {
                 bitacora.escribir(Bitacora.Operacion.INGRESO, "cuenta_bloqueada", "Usuario bloqueado " + MINUTOS_BLOQUEO
                         + " minutos por " + INTENTOS_MAXIMOS + " intentos fallidos", encontrado.get().id(), encontrado.get().usuario(), ip);
@@ -208,25 +217,35 @@ public class ServicioIngreso {
         }
 
         int minutos = parametros.minutosSesion();
-        UUID sid = sesiones.abrir(u.id(), ahora, minutos, ip).orElseThrow(() -> {
+        UUID sid = cierres.abrir(u.id(), minutos, ip).orElseThrow(() -> {
             // Otra sesión del usuario se abrió mientras tanto
             bitacora.escribir(Bitacora.Operacion.INGRESO, "login_fallido", "Ingreso rechazado: el usuario ya tiene una sesión abierta", u.id(),
                     u.usuario(), ip);
             return sesionAbierta(minutos);
         });
-        usuarios.registrarIngreso(u.id(), ahora);
-
-        String continuar = continuar(req, res);
-        // Sesión del emisor nueva (fijación de sesión): el id que circuló antes del ingreso deja de servir
-        HttpSession anterior = req.getSession(false);
-        if (anterior != null) {
-            anterior.invalidate();
+        String continuar;
+        try {
+            usuarios.registrarIngreso(u.id(), ahora);
+            continuar = continuar(req, res);
+            // Sesión del emisor nueva (fijación de sesión): el id que circuló antes del ingreso deja de servir
+            HttpSession anterior = req.getSession(false);
+            if (anterior != null) {
+                anterior.invalidate();
+            }
+            req.getSession(true);
+            SecurityContext ctx = SecurityContextHolder.createEmptyContext();
+            // Dos factores con su hora (contraseña y código de un solo uso por correo): el emisor deriva de ellos el auth_time del id token
+            // ArrayList (no List.of): la autorización guardada se lee con la lista de tipos permitidos de Jackson del emisor
+            ctx.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(sid.toString(), null, new java.util.ArrayList<>(List.of(
+                    FactorGrantedAuthority.withAuthority(FactorGrantedAuthority.PASSWORD_AUTHORITY).issuedAt(ahora).build(),
+                    FactorGrantedAuthority.withAuthority(FactorGrantedAuthority.OTT_AUTHORITY).issuedAt(ahora).build()))));
+            SecurityContextHolder.setContext(ctx);
+            contextos.saveContext(ctx, req, res);
+        } catch (RuntimeException e) {
+            // Sin esto la fila quedaría abierta sin dueño y el usuario recibiría 409 hasta que pase la inactividad (revisión Java, B10)
+            cierres.cerrar(sid, RepositorioSesiones.Motivo.CERRADA);
+            throw e;
         }
-        req.getSession(true);
-        SecurityContext ctx = SecurityContextHolder.createEmptyContext();
-        ctx.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(sid.toString(), null, List.of()));
-        SecurityContextHolder.setContext(ctx);
-        contextos.saveContext(ctx, req, res);
         bitacora.escribir(Bitacora.Operacion.INGRESO, "login", "Inicio de sesión", u.id(), u.usuario(), ip);
         return new Completo(u.usuario(), u.nombre(), continuar);
     }
@@ -240,7 +259,7 @@ public class ServicioIngreso {
         Instant ahora = reloj.instant();
         Long uid = vigente(s, CAMBIO_USUARIO, CAMBIO_DESDE, ahora)
                 .orElseThrow(() -> new ErrorNegocio(HttpStatus.UNAUTHORIZED, VERIFICACION_VENCIDA, Map.of("motivo", "mfa_vencido")));
-        Optional<Usuario> enBase = usuarios.porId(uid).filter(Usuario::activo);
+        Optional<Usuario> enBase = usuarios.porId(uid).filter(Usuario::activo).filter(x -> !x.bloqueado(ahora));
         if (enBase.isPresent() && !enBase.get().claveInicial() && !enBase.get().claveVencida(ahora)) {
             throw ErrorNegocio.conflicto("La contraseña ya se cambió (¿envió el formulario dos veces?). Ingrese con la contraseña nueva.");
         }
@@ -251,7 +270,7 @@ public class ServicioIngreso {
         if (!nueva.equals(confirmacion)) {
             throw ErrorNegocio.validacion("Las contraseñas no coinciden.");
         }
-        if (codificador.matches(nueva, u.claveHash())) {
+        if (coincide(nueva, u.claveHash())) {
             throw ErrorNegocio.validacion(u.claveInicial() ? "La nueva contraseña debe ser diferente a la que le asignó el administrador."
                     : "La nueva contraseña debe ser diferente a la actual.");
         }
@@ -275,6 +294,22 @@ public class ServicioIngreso {
             bitacora.escribir(Bitacora.Operacion.INGRESO, "login_fallido", "Ingreso rechazado: el usuario ya tiene una sesión abierta", u.id(),
                     u.usuario(), ip);
             throw sesionAbierta(minutos);
+        }
+    }
+
+    /**
+     * ¿La contraseña corresponde al hash? Nunca lanza: sin contraseña o sin hash verifica contra el hash de relleno (mismo tiempo) y
+     * responde que no; más de 72 bytes (BCrypt los rechaza) cuenta como contraseña errada, no como error del servidor.
+     */
+    private boolean coincide(String clave, String hash) {
+        try {
+            if (clave == null || hash == null) {
+                codificador.matches(clave == null ? "" : clave, hashRelleno);
+                return false;
+            }
+            return codificador.matches(clave, hash);
+        } catch (IllegalArgumentException e) {
+            return false;
         }
     }
 
@@ -334,18 +369,26 @@ public class ServicioIngreso {
     private void enviarCodigo(Usuario u, String ip) {
         Instant ahora = reloj.instant();
         int tope = cfg.mfa().codigosPorHora();
-        long ultimaHora = jdbc.sql("SELECT count(*) FROM mfa_codigos WHERE usuario_id = :u AND creado > :desde")
-                .param("u", u.id()).param("desde", ahora.minusSeconds(3600).atOffset(ZoneOffset.UTC)).query(Long.class).single();
-        if (!Mfa.puedeEnviarOtro((int) ultimaHora, tope)) {
+        String codigo = Huellas.codigoSeisDigitos();
+        // Primero se registra (cuenta para el tope por hora) y después sale el correo: nunca un código enviado sin registro. Conteo e
+        // inserción con un bloqueo consultivo por usuario: varios «reenviar» a la vez no pasan el tope (revisión Java, M4).
+        Long id = tx.execute(s -> {
+            jdbc.sql("SELECT pg_advisory_xact_lock(:clase, :u)").param("clase", BLOQUEO_MFA).param("u", (int) u.id())
+                    .query(Object.class).optional();
+            long ultimaHora = jdbc.sql("SELECT count(*) FROM mfa_codigos WHERE usuario_id = :u AND creado > :desde")
+                    .param("u", u.id()).param("desde", ahora.minusSeconds(3600).atOffset(ZoneOffset.UTC)).query(Long.class).single();
+            if (!Mfa.puedeEnviarOtro((int) ultimaHora, tope)) {
+                return null;
+            }
+            return jdbc.sql("""
+                    INSERT INTO mfa_codigos (usuario_id, codigo_hash, creado, vence, ip) VALUES (:u, :h, :creado, :vence, :ip) RETURNING id""")
+                    .param("u", u.id()).param("h", Huellas.sha256(codigo)).param("creado", ahora.atOffset(ZoneOffset.UTC))
+                    .param("vence", Mfa.vence(ahora).atOffset(ZoneOffset.UTC)).param("ip", ip).query(Long.class).single();
+        });
+        if (id == null) {
             throw new ErrorNegocio(HttpStatus.TOO_MANY_REQUESTS, "Ya se enviaron " + tope
                     + " códigos en la última hora. Espere un momento antes de pedir otro.");
         }
-        String codigo = Huellas.codigoSeisDigitos();
-        // Primero se registra (cuenta para el tope por hora) y después sale el correo: nunca un código enviado sin registro
-        long id = jdbc.sql("""
-                INSERT INTO mfa_codigos (usuario_id, codigo_hash, creado, vence, ip) VALUES (:u, :h, :creado, :vence, :ip) RETURNING id""")
-                .param("u", u.id()).param("h", Huellas.sha256(codigo)).param("creado", ahora.atOffset(ZoneOffset.UTC))
-                .param("vence", Mfa.vence(ahora).atOffset(ZoneOffset.UTC)).param("ip", ip).query(Long.class).single();
         CorreoSeguridad.Resultado r = correo.enviar(PlantillasCorreo.codigoMfa(u.id(), u.correo(), u.nombre(), codigo));
         if (!r.ok()) {
             jdbc.sql("UPDATE mfa_codigos SET usado = :ahora WHERE id = :id").param("ahora", ahora.atOffset(ZoneOffset.UTC)).param("id", id).update();

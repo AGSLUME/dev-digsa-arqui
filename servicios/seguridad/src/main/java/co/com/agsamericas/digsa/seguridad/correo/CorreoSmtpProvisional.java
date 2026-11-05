@@ -84,7 +84,7 @@ public class CorreoSmtpProvisional implements CorreoSeguridad {
                     .param("d", cortar(envio.para(), 150)).param("a", cortar(envio.asunto(), 200)).param("c", envio.htmlRegistro())
                     .param("e", r.ok() ? "enviado" : "fallido").param("err", cortar(r.error(), 500)).update();
         } catch (RuntimeException e) {
-            LOG.error("[correo] No se pudo registrar {}", envio, e);
+            LOG.error("[correo] No se pudo registrar {}: {}", envio, e.getClass().getName());
         }
     }
 

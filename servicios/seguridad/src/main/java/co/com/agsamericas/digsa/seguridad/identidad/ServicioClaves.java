@@ -23,7 +23,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Contraseñas fuera del ingreso, portado de {@code identidad.ServicioClaves} del monolito: enlace de un solo uso al correo (60 minutos,
@@ -45,13 +45,15 @@ public class ServicioClaves {
     private final PasswordEncoder codificador;
     private final BitacoraSeguridad bitacora;
     private final PropiedadesSeguridad cfg;
+    private final TransactionTemplate tx;
     private final Clock reloj;
     /** «Olvidé mi contraseña» fuera de la petición; cola acotada: una avalancha de solicitudes no agota la memoria ni el SMTP. */
     private final ThreadPoolExecutor hilosOlvido = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS, new ArrayBlockingQueue<>(100),
             Thread.ofPlatform().name("lume-olvido").daemon(true).factory());
 
     public ServicioClaves(RepositorioUsuarios usuarios, RepositorioSesiones sesiones, ServicioSesiones cierres, CorreoSeguridad correo,
-                          PasswordEncoder codificador, BitacoraSeguridad bitacora, PropiedadesSeguridad cfg, Clock reloj) {
+                          PasswordEncoder codificador, BitacoraSeguridad bitacora, PropiedadesSeguridad cfg, TransactionTemplate tx,
+                          Clock reloj) {
         this.usuarios = usuarios;
         this.sesiones = sesiones;
         this.cierres = cierres;
@@ -59,6 +61,7 @@ public class ServicioClaves {
         this.codificador = codificador;
         this.bitacora = bitacora;
         this.cfg = cfg;
+        this.tx = tx;
         this.reloj = reloj;
     }
 
@@ -86,8 +89,10 @@ public class ServicioClaves {
                 .filter(u -> Claves.enlaceVigente(u.tokenHash(), u.tokenVence(), token, ahora));
     }
 
-    /** Define la contraseña con el enlace. Consume el enlace y cierra la sesión que hubiera abierta (sesión única, decisión 7.3). */
-    @Transactional
+    /**
+     * Define la contraseña con el enlace. Consume el enlace y cierra la sesión que hubiera abierta (sesión única, decisión 7.3). La
+     * validación y el BCrypt van fuera de la transacción: no retienen una conexión del pool (revisión Java, M6).
+     */
     public void definir(String token, String clave, String confirmacion) {
         Usuario u = usuarioDelEnlace(token).orElseThrow(() -> ErrorNegocio.validacion(
                 "El enlace no es válido o ya venció. Pida uno nuevo con «¿Olvidó su contraseña?»."));
@@ -97,18 +102,20 @@ public class ServicioClaves {
         if (!clave.equals(confirmacion)) {
             throw ErrorNegocio.validacion("Las contraseñas no coinciden.");
         }
-        if (u.claveDefinida() && codificador.matches(clave, u.claveHash())) {
+        if (u.claveDefinida() && coincide(clave, u.claveHash())) {
             throw ErrorNegocio.validacion("La nueva contraseña debe ser diferente a la actual.");
         }
         Instant ahora = reloj.instant();
-        boolean ok = usuarios.definirClave(u.id(), u.tokenHash(), codificador.encode(clave),
-                ahora.plus(Duration.ofDays(cfg.claveVigenciaDias())), ahora);
-        if (!ok) {
-            throw ErrorNegocio.validacion("El enlace ya se usó. Pida uno nuevo con «¿Olvidó su contraseña?».");
-        }
+        String hash = codificador.encode(clave);
+        Boolean cerroSesion = tx.execute(s -> {
+            if (!usuarios.definirClave(u.id(), u.tokenHash(), hash, ahora.plus(Duration.ofDays(cfg.claveVigenciaDias())), ahora)) {
+                throw ErrorNegocio.validacion("El enlace ya se usó. Pida uno nuevo con «¿Olvidó su contraseña?».");
+            }
+            return cierres.cerrarDeUsuario(u.id(), Motivo.CLAVE);
+        });
         bitacora.escribir(Bitacora.Operacion.ACTUALIZACION, "clave_cambio", "Contraseña definida por enlace del usuario " + u.usuario(), u.id(),
                 u.usuario(), null);
-        if (cierres.cerrarDeUsuario(u.id(), Motivo.CLAVE)) {
+        if (Boolean.TRUE.equals(cerroSesion)) {
             bitacora.escribir(Bitacora.Operacion.SALIDA, "sesion_cerrada", "Sesión cerrada por cambio de contraseña", u.id(), u.usuario(), null);
         }
     }
@@ -150,7 +157,8 @@ public class ServicioClaves {
             bitacora.escribir(Bitacora.Operacion.ACTUALIZACION, "clave_olvido", "Enlace de recuperación para " + u.get().usuario()
                     + (e.ok() ? "" : " (el correo NO salió)"), u.get().id(), u.get().usuario(), null);
         } catch (RuntimeException e) {
-            LOG.error("[claves] No se pudo atender la recuperación de contraseña", e);
+            // Solo la clase: el mensaje de la excepción puede llevar el correo (dato personal)
+            LOG.error("[claves] No se pudo atender la recuperación de contraseña: {}", e.getClass().getName());
         }
     }
 
@@ -168,7 +176,7 @@ public class ServicioClaves {
             // Bloqueado por intentos (también desde el ingreso): sin intentos ilimitados aquí ni desbloqueo por acertar
             cerrarPorBloqueo(u, "Sesión cerrada: el usuario está bloqueado por intentos fallidos", ip);
         }
-        if (actual == null || !codificador.matches(actual, u.claveHash())) {
+        if (!coincide(actual, u.claveHash())) {
             if (usuarios.registrarFallo(u.id(), ahora, ServicioIngreso.INTENTOS_MAXIMOS, ServicioIngreso.MINUTOS_BLOQUEO)) {
                 bitacora.escribir(Bitacora.Operacion.INGRESO, "cuenta_bloqueada", "Usuario bloqueado " + ServicioIngreso.MINUTOS_BLOQUEO
                         + " minutos por " + ServicioIngreso.INTENTOS_MAXIMOS + " intentos fallidos", u.id(), u.usuario(), ip);
@@ -184,7 +192,7 @@ public class ServicioClaves {
         if (!nueva.equals(confirmacion)) {
             throw ErrorNegocio.validacion("Las contraseñas no coinciden.");
         }
-        if (codificador.matches(nueva, u.claveHash())) {
+        if (coincide(nueva, u.claveHash())) {
             throw ErrorNegocio.validacion("La nueva contraseña debe ser diferente a la actual.");
         }
         if (!usuarios.cambiarClave(u.id(), u.claveHash(), codificador.encode(nueva), ahora.plus(Duration.ofDays(cfg.claveVigenciaDias())), ahora)) {
@@ -195,6 +203,15 @@ public class ServicioClaves {
         }
         bitacora.escribir(Bitacora.Operacion.ACTUALIZACION, "clave_cambio", "Contraseña cambiada por el usuario " + u.usuario()
                 + " desde su sesión", u.id(), u.usuario(), ip);
+    }
+
+    /** ¿La contraseña corresponde al hash? Nunca lanza: más de 72 bytes (BCrypt los rechaza) cuenta como no coincidente. */
+    private boolean coincide(String clave, String hash) {
+        try {
+            return clave != null && hash != null && codificador.matches(clave, hash);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     private void cerrarPorBloqueo(Usuario u, String motivo, String ip) {

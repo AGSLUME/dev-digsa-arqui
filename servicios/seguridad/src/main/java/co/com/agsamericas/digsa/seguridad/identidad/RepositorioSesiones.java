@@ -9,7 +9,6 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Sesiones de LUME (tabla {@code sesiones}): una fila por ingreso completo; su id es el claim {@code sid} del token (ADR-004).
@@ -55,18 +54,28 @@ public class RepositorioSesiones {
     }
 
     /**
-     * Abre la sesión del usuario. Con la fila del usuario bloqueada: cierra por inactividad la abierta que ya superó el plazo y abre la
-     * nueva solo si no queda otra abierta (dos ingresos casi simultáneos no pasan los dos).
-     *
-     * @return el id de la sesión nueva (el {@code sid}), o vacío si otra sesión sigue abierta y activa
+     * Bloquea la fila del usuario hasta el fin de la transacción (la apertura de su sesión se serializa). Lo usa
+     * {@link ServicioSesiones#abrir}, que abre la transacción.
      */
-    @Transactional
-    public Optional<UUID> abrir(long usuarioId, Instant ahora, int minutos, String ip) {
+    void bloquearUsuario(long usuarioId) {
         jdbc.sql("SELECT id FROM usuarios WHERE id = :u FOR UPDATE").param("u", usuarioId).query(Long.class).optional();
-        jdbc.sql("""
+    }
+
+    /** Cierra por inactividad la sesión abierta del usuario que ya superó el plazo. @return las que cerró */
+    List<UUID> cerrarInactivas(long usuarioId, Instant ahora, int minutos) {
+        return jdbc.sql("""
                 UPDATE sesiones SET cerrada = :ahora, motivo = 'inactividad'
-                WHERE usuario_id = :u AND cerrada IS NULL AND ultimo <= :limite""")
-                .param("ahora", odt(ahora)).param("u", usuarioId).param("limite", odt(ahora.minusSeconds(60L * minutos))).update();
+                WHERE usuario_id = :u AND cerrada IS NULL AND ultimo <= :limite RETURNING id""")
+                .param("ahora", odt(ahora)).param("u", usuarioId).param("limite", odt(ahora.minusSeconds(60L * minutos)))
+                .query(UUID.class).list();
+    }
+
+    /**
+     * Abre la sesión nueva solo si no queda otra abierta (índice único parcial: dos ingresos casi simultáneos no pasan los dos).
+     *
+     * @return el id de la sesión nueva (el {@code sid}), o vacío si otra sesión sigue abierta
+     */
+    Optional<UUID> insertar(long usuarioId, Instant ahora, String ip) {
         UUID id = UUID.randomUUID();
         int creadas = jdbc.sql("""
                 INSERT INTO sesiones (id, usuario_id, inicio, ultimo, ip) VALUES (:id, :u, :ahora, :ahora, :ip)

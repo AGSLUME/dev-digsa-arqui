@@ -5,6 +5,8 @@ LUME_JWK_CLAVE: "cHJ1ZWJhLXNvbG8tcHJ1ZWJhLXNvbG8tcHJ1ZWJhLTE="
 LUME_URL_SEGURA: "false"
 
 lume:
+  contrasenas:
+    permitir-noop: true
   captcha:
     permitir-sin-clave: true
   correo:
