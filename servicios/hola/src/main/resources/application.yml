@@ -1,0 +1,30 @@
+server:
+  port: ${HOLA_PUERTO:9109}
+  forward-headers-strategy: framework
+
+spring:
+  application:
+    name: hola
+  threads:
+    virtual:
+      enabled: true
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # El emisor es la URL pública del gateway (ADR-004); las claves se piden por la red interna.
+          issuer-uri: ${LUME_EMISOR:http://localhost:9000}
+          jwk-set-uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}/oauth2/jwks
+          audiences: lume
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# Logs JSON (ADR-009): fuera de las pruebas se activan con LOGGING_STRUCTURED_FORMAT_CONSOLE=logstash (infra/.env).

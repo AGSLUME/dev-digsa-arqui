@@ -1,0 +1,63 @@
+# ANDAMIAJE I1: emisor OIDC mínimo para el humo de punta a punta. La sesión seguridad lo reemplaza en S1 (usuarios en base, MFA por
+# correo, Turnstile, sesión única, claves y JWK persistentes con rotación). Ningún secreto tiene valor por defecto: vienen del .env.
+server:
+  port: ${SEGURIDAD_PUERTO:9101}
+  # Detrás del gateway: arma redirecciones y el emisor con el host público. En el cierre se restringe a las IP del gateway.
+  forward-headers-strategy: framework
+  servlet:
+    session:
+      cookie:
+        # Distinto del de gateway: las cookies se separan por host, no por puerto.
+        name: LUME_IDP
+        same-site: lax
+        http-only: true
+
+spring:
+  application:
+    name: seguridad
+  threads:
+    virtual:
+      enabled: true
+  security:
+    user:
+      name: ${LUME_USUARIO_DEV:}
+      password: ${LUME_CLAVE_DEV:}
+      roles: ${LUME_PERFIL_DEV:ADMINISTRADOR}
+    oauth2:
+      authorizationserver:
+        issuer: ${LUME_EMISOR:http://localhost:9000}
+        client:
+          gateway:
+            registration:
+              client-id: gateway
+              client-secret: ${LUME_GATEWAY_SECRETO_CODIFICADO:}
+              client-authentication-methods: client_secret_basic
+              authorization-grant-types: authorization_code,refresh_token
+              redirect-uris: ${LUME_EMISOR:http://localhost:9000}/bff/login/oauth2/code/lume
+              post-logout-redirect-uris: ${LUME_EMISOR:http://localhost:9000}/
+              scopes: openid,profile
+            require-proof-key: true
+            require-authorization-consent: false
+            token:
+              access-token-time-to-live: 5m
+              refresh-token-time-to-live: 8h
+              reuse-refresh-tokens: false
+          humo:
+            registration:
+              client-id: humo
+              client-secret: ${LUME_HUMO_SECRETO_CODIFICADO:}
+              client-authentication-methods: client_secret_basic
+              authorization-grant-types: client_credentials
+              scopes: lume.humo
+            token:
+              access-token-time-to-live: 5m
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
