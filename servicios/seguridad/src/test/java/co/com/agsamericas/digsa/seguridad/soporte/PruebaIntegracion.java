@@ -40,7 +40,12 @@ public abstract class PruebaIntegracion {
 
     @BeforeEach
     void prepararBase() {
-        mvc = MockMvcBuilders.webAppContextSetup(contexto).apply(springSecurity()).build();
+        // Con el filtro de Spring Session (sesión del emisor en base, cookie LUME_IDP) antes del de seguridad, como en el servidor real:
+        // sin él, MockMvc usaría su propia sesión en memoria y la cookie no la recuperaría.
+        mvc = MockMvcBuilders.webAppContextSetup(contexto)
+                .addFilters(contexto.getBean("springSessionRepositoryFilter", jakarta.servlet.Filter.class))
+                .apply(springSecurity())
+                .build();
         correos.limpiar();
         reloj.reiniciar();
         datos = new DatosPrueba(jdbc, reloj);

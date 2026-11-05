@@ -3,3 +3,9 @@ LUME_GATEWAY_SECRETO_CODIFICADO: "{noop}gateway-solo-prueba"
 # AES-256 de prueba (32 bytes en base64): solo cifra claves de firma generadas dentro de la prueba.
 LUME_JWK_CLAVE: "cHJ1ZWJhLXNvbG8tcHJ1ZWJhLXNvbG8tcHJ1ZWJhLTE="
 LUME_URL_SEGURA: "false"
+
+lume:
+  captcha:
+    permitir-sin-clave: true
+  correo:
+    dominio-permitido: seguridad.prueba.local

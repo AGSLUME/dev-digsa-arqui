@@ -133,7 +133,8 @@
                                 <openApiNullable>false</openApiNullable>
                                 <annotationLibrary>none</annotationLibrary>
                                 <documentationProvider>none</documentationProvider>
-                                <useBeanValidation>true</useBeanValidation>
+                                <!-- Sin validación generada: sus mensajes son los por defecto; los controladores validan con los textos exactos del monolito. -->
+                                <useBeanValidation>false</useBeanValidation>
                                 <performBeanValidation>false</performBeanValidation>
                                 <sourceFolder>src/main/java</sourceFolder>
                             </configOptions>

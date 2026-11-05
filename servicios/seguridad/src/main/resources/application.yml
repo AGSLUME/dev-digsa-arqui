@@ -60,6 +60,14 @@ spring:
     create-schemas: false
     placeholders:
       rol_app: ${SEGURIDAD_DB_USUARIO:seguridad}
+  mail:
+    # Solo para el adaptador provisional de correo (D2). En local, el Mailpit ya instalado.
+    host: ${LUME_SMTP_HOST:127.0.0.1}
+    port: ${LUME_SMTP_PUERTO:1025}
+    properties:
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 10000
+      mail.smtp.writetimeout: 10000
   session:
     # La sesión del emisor solo vive mientras dura el ingreso (paso 1 → código → autorización). Se invalida al emitir el código OIDC:
     # después, la sesión es la del gateway (LUME_SESION) y el ingreso siguiente vuelve a pedir usuario, contraseña y código.

@@ -90,6 +90,6 @@ class EmisorTest {
                         + "&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256")
                         .accept(MediaType.TEXT_HTML)) // como un navegador: sin text/html el emisor responde 401
                 .andExpect(status().is3xxRedirection())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl("/login"));
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl("/ingreso"));
     }
 }
