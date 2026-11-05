@@ -25,10 +25,19 @@ npx ng test --watch=false
 - npm 11 deja sin aprobar los scripts de instalación de `@parcel/watcher`, `esbuild`, `lmdb` y `msgpackr-extract`. El build y las
   pruebas no los necesitan; no se aprueban sin revisión de la integradora.
 - Cliente HTTP (ADR-007): `scripts/generar-api.mjs` corre `typescript-angular` de openapi-generator **7.26.0** (el mismo del pom)
-  sobre `contratos/<servicio>.yaml` hacia `src/app/api/<servicio>/` (no se versiona). Antes verifica el SHA-1 del jar contra el que
-  publica Maven Central; para comprobarlo a mano:
-  `curl -s https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/7.26.0/openapi-generator-cli-7.26.0.jar.sha1` (debe
-  dar `b96b148fcf482808037f68fbad99cb4d7e65d40b`) y `sha1sum node_modules/@openapitools/openapi-generator-cli/versions/7.26.0.jar`.
+  sobre `contratos/<servicio>.yaml` hacia `src/app/api/<servicio>/` (no se versiona). Antes verifica el **SHA-256** del jar
+  (`1760050094997b9cc790cc1350be095f15da8c08a996b184d3eadc4ccda5e35e`). Maven Central solo publica `.sha1` y la firma `.asc` de ese
+  jar; el SHA-256 fijado es el del jar que pasó las dos. Para repetirlo (con un llavero temporal):
+
+  ```bash
+  B=https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/7.26.0/openapi-generator-cli-7.26.0.jar
+  curl -s $B.sha1                                     # b96b148fcf482808037f68fbad99cb4d7e65d40b
+  curl -s -o g.jar $B && curl -s -o g.jar.asc $B.asc && sha1sum g.jar && sha256sum g.jar
+  export GNUPGHOME=$(mktemp -d)
+  curl -s 'https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0xAE81EA0BD1BE2997053CC6C50D49734800E3AA0C' | gpg --import
+  gpg --verify g.jar.asc g.jar                        # Good signature from "William Cheng" (mantenedor de OpenAPI Generator)
+  ```
+
   Un contrato nuevo se agrega en `SERVICIOS` del script y en `src/app/nucleo/proveedores.ts`.
 - Licencias de lo que se copia de terceros (trazos de Tabler Icons, fuente Inter): `LICENCIAS-TERCEROS.md`.
 - E2E: `../e2e` (Playwright en Chromium, Firefox y WebKit; ver su README).

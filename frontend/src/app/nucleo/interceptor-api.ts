@@ -29,6 +29,15 @@ function sinSesionDeUsuario(url: string): boolean {
   return url.startsWith('/api/auth/') || url.startsWith('/api/opl-publico/');
 }
 
+/** ¿La petición va al mismo origen de la página? Se resuelve como lo haría el navegador. */
+export function mismoOrigen(url: string, origen = globalThis.location?.origin ?? 'http://localhost'): boolean {
+  try {
+    return new URL(url, origen).origin === origen;
+  } catch {
+    return false;
+  }
+}
+
 function esEscritura(req: HttpRequest<unknown>): boolean {
   return !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
 }
@@ -74,9 +83,9 @@ export const interceptorApi: HttpInterceptorFn = (req, next) => {
       }),
     );
 
-  // Solo el mismo origen (ruta relativa): a otro origen ni se pide /api/auth/inicio ni va el token CSRF
-  const mismoOrigen = url.startsWith('/') && !url.startsWith('//');
-  if (!mismoOrigen || url === INICIO || !esEscritura(req) || xsrf.getToken() !== null) return enviar(req);
+  // Solo el mismo origen: a otro origen (también «//otro» o «/\otro», que el navegador resuelve afuera) ni se pide /api/auth/inicio ni
+  // va el token CSRF
+  if (!mismoOrigen(url) || url === INICIO || !esEscritura(req) || xsrf.getToken() !== null) return enviar(req);
   // Sin cookie CSRF todavía: GET /api/auth/inicio la deja lista y luego va la escritura. El interceptor XSRF de Angular corre antes que
   // este (ya pasó, sin cookie), así que la cabecera se pone aquí con el valor recién recibido.
   // Varias escrituras a la vez sin cookie comparten un solo GET /api/auth/inicio

@@ -495,8 +495,18 @@ const rutas = {
 
 const ESCRITURA = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+/** Contra DNS rebinding: solo se atiende con Host local (directo o por el proxy de ng serve, que lo conserva). */
+export function hostLocal(host) {
+  const nombre = String(host ?? '')
+    .replace(/:\d+$/, '')
+    .replace(/^\[(.*)\]$/, '$1')
+    .toLowerCase();
+  return ['127.0.0.1', 'localhost', '::1'].includes(nombre);
+}
+
 const servidor = createServer(async (req, res) => {
   const r = new Respuesta(res);
+  if (!hostLocal(req.headers.host)) return r.problema(403, 'No tiene permiso para esta acción.');
   const camino = new URL(req.url, 'http://x').pathname;
   try {
     const manejador = rutas[`${req.method} ${camino}`];
