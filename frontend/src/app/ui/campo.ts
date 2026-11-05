@@ -78,11 +78,11 @@ export class Campo {
   /** Contraseña: agrega el botón «Mostrar u ocultar lo escrito». */
   readonly clave = input(false, { transform: booleanAttribute });
   /** id del control; por omisión uno único. */
-  readonly idCampo = input<string | undefined>(undefined, { alias: 'id' });
+  readonly idControl = input<string | undefined>(undefined);
 
   private readonly idAuto = `campo-${++siguiente}`;
   get id(): string {
-    return this.idCampo() ?? this.idAuto;
+    return this.idControl() ?? this.idAuto;
   }
 
   readonly invalido = computed(() => {
@@ -115,7 +115,8 @@ export class Campo {
 /**
  * El control nativo de un `lume-campo`: recibe del campo el id (para la etiqueta), `aria-invalid`, `aria-describedby` y
  * `aria-required`. Fuera de un `lume-campo` solo pone la clase del control LUME. Si la pantalla necesita un id fijo para el control,
- * lo pone en el `lume-campo` (`<lume-campo id="usuario">`): un `id` escrito en el `<input>` lo reemplaza el del campo.
+ * lo pone en el `lume-campo` (`<lume-campo idControl="usuario">`), no como `id` (quedaría repetido en el campo y en el control): un `id`
+ * escrito en el `<input>` lo reemplaza el del campo.
  */
 @Directive({
   selector: 'input[lumeEntrada], select[lumeEntrada], textarea[lumeEntrada]',

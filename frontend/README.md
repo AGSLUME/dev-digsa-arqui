@@ -11,6 +11,7 @@ node mock/servidor.mjs                   # mock del gateway + seguridad en 127.0
 npm start -- --port 4220                 # ng serve; /api, /bff y /oauth2 van al gateway (o al mock) por proxy.conf.mjs
 npx ng build
 npx ng test --watch=false
+npx ng lint                              # reglas de Angular y accesibilidad de las plantillas (también en el CI)
 ```
 
 - Puertos de la sesión angular (ADR-010): Angular 4220, gateway 9200. Otro gateway: `DIGSA_GATEWAY_PUERTO`.
@@ -92,5 +93,5 @@ frontend decide **dónde y cómo** se muestran. Para portar una pantalla del mon
 8. **Pruebas.** Unitarias junto al archivo (`*.spec.ts`, Vitest); las del monolito se portan con los mismos casos. E2E en
    `../e2e/pruebas/<modulo>.spec.ts`, portadas de `digsa-java/e2e/pruebas` cambiando solo selectores; `responsivo-360.spec.ts` recorre
    sola las pantallas nuevas del menú a 360 px.
-9. **Accesibilidad AA.** Íconos `aria-hidden`; botones de solo ícono con `aria-label`; foco visible; 44 px en lo táctil; nada de
+9. **Accesibilidad AA.** `ng lint` revisa las plantillas con el conjunto accessibility de @angular-eslint. Íconos `aria-hidden`; botones de solo ícono con `aria-label`; foco visible; 44 px en lo táctil; nada de
    desplazamiento horizontal a 360 px. Lo que choque con la paridad del monolito se anota en `docs/sesiones/DESVIACIONES_A11Y.md`.
