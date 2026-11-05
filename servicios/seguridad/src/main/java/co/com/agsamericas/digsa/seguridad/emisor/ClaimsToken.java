@@ -77,8 +77,9 @@ class ClaimsToken implements OAuth2TokenCustomizer<JwtEncodingContext> {
         }
         UUID sid = sid(ctx.getPrincipal().getName()).orElseThrow(ClaimsToken::sinSesion);
         RepositorioSesiones.Fila sesion = sesiones.porId(sid).filter(RepositorioSesiones.Fila::abierta).orElseThrow(ClaimsToken::sinSesion);
-        Usuario u = usuarios.porId(sesion.usuarioId()).filter(Usuario::activo).filter(x -> !x.bloqueado(reloj.instant()))
-                .orElseThrow(ClaimsToken::sinSesion);
+        // Un bloqueo por intentos (desde otro equipo) no cierra la sesión abierta, como en el monolito (FiltroSesion no lo revisa);
+        // el cierre por bloqueo es el de «cambiar mi contraseña», que cierra la sesión y así deja de refrescar.
+        Usuario u = usuarios.porId(sesion.usuarioId()).filter(Usuario::activo).orElseThrow(ClaimsToken::sinSesion);
         ctx.getClaims()
                 .subject(String.valueOf(u.id()))
                 .claim(ClaimsLume.UID, u.id())

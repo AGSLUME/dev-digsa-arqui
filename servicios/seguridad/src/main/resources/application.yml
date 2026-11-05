@@ -85,10 +85,11 @@ spring:
               client-id: gateway
               client-secret: ${LUME_GATEWAY_SECRETO_CODIFICADO:}
               client-authentication-methods: client_secret_basic
-              authorization-grant-types: authorization_code,refresh_token
+              # client_credentials: el gateway consulta, informa y cierra sesiones en /interno/sesiones (alcance seguridad:sesiones)
+              authorization-grant-types: authorization_code,refresh_token,client_credentials
               redirect-uris: ${LUME_EMISOR:http://localhost:9000}/bff/login/oauth2/code/lume
               post-logout-redirect-uris: ${LUME_EMISOR:http://localhost:9000}/ingreso
-              scopes: openid,profile
+              scopes: openid,profile,seguridad:sesiones
             require-proof-key: true
             require-authorization-consent: false
             token:

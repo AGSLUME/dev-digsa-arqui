@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: LUME · seguridad
-  version: 0.1.0
+  version: 0.2.0
   description: |
     API del servicio `seguridad` (ADR-002, ADR-004, ADR-014), tal como la ve la SPA **a través del gateway** (mismo origen).
 
@@ -53,6 +53,8 @@ tags:
     description: La cuenta propia. Requiere sesión.
   - name: bff
     description: Rutas del gateway (BFF). No las implementa `seguridad`.
+  - name: interno
+    description: Solo red interna, para el gateway (tokens de máquina). No pasan por el gateway hacia afuera.
 paths:
   /api/auth/inicio:
     get:
@@ -496,10 +498,111 @@ paths:
           description: Sesión cerrada.
         '419':
           $ref: '#/components/responses/PaginaExpirada'
+  /interno/sesiones/{sid}:
+    get:
+      tags: [interno]
+      operationId: estadoSesionInterno
+      summary: Estado de una sesión (solo el gateway)
+      description: |
+        **Solo red interna.** El gateway lo consulta en cada petición `/api/**` (con caché de 30 s como máximo) y cierra su sesión si la
+        respuesta no es vigente, con el `motivo` y el `mensaje` del 401 (tabla del encabezado). Revisa, en el orden de `FiltroSesion` del
+        monolito: usuario inactivo, contraseña cambiada después del inicio, sesión cerrada (por salida, el administrador, otro ingreso o
+        bloqueo), contraseña vencida y cambio exigido (este último envía el enlace). La inactividad la mide el gateway con `minutos` y la
+        informa con `cerrar`. Consultar el estado no cuenta como actividad. Token de máquina con el alcance `seguridad:sesiones`.
+      security:
+        - maquina: [seguridad:sesiones]
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+      responses:
+        '200':
+          description: Estado (vigente o no, con su motivo).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstadoInterno'
+        '401':
+          description: Sin token de máquina.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '403':
+          description: Token sin el alcance `seguridad:sesiones`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+  /interno/sesiones/{sid}/actividad:
+    post:
+      tags: [interno]
+      operationId: actividadSesionInterno
+      summary: Actividad de una sesión (solo el gateway)
+      description: |
+        **Solo red interna.** El gateway informa la actividad como máximo cada 30 s; con ella `seguridad` decide si un ingreso nuevo del
+        mismo usuario se rechaza (decisión 7.1: una sola sesión activa). Nunca mueve la actividad hacia atrás.
+      security:
+        - maquina: [seguridad:sesiones]
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+      responses:
+        '204':
+          description: Registrada (o la sesión ya estaba cerrada).
+        '401':
+          description: Sin token de máquina.
+        '403':
+          description: Token sin el alcance `seguridad:sesiones`.
+  /interno/sesiones/{sid}/cerrar:
+    post:
+      tags: [interno]
+      operationId: cerrarSesionInterno
+      summary: Cerrar una sesión (solo el gateway)
+      description: |
+        **Solo red interna.** Cierra la sesión y revoca sus autorizaciones (refresh token) y la sesión del emisor. Lo usa el gateway al
+        salir (`salida`) y al vencer la inactividad (`inactividad`). Idempotente.
+      security:
+        - maquina: [seguridad:sesiones]
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CierreInterno'
+      responses:
+        '204':
+          description: Cerrada (o ya lo estaba).
+        '401':
+          description: Sin token de máquina.
+        '403':
+          description: Token sin el alcance `seguridad:sesiones`.
+        '422':
+          description: Motivo no válido.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
 components:
   securitySchemes:
     sesionGateway:
       $ref: './comun.yaml#/components/securitySchemes/sesionGateway'
+    maquina:
+      type: oauth2
+      description: Token de máquina (client_credentials) emitido por `seguridad`; la audiencia es el servicio del alcance.
+      flows:
+        clientCredentials:
+          tokenUrl: /oauth2/token
+          scopes:
+            'seguridad:sesiones': Consultar, informar actividad y cerrar sesiones (gateway).
+  parameters:
+    Sid:
+      name: sid
+      in: path
+      required: true
+      description: Id de la sesión (claim `sid` del token).
+      schema:
+        type: string
+        format: uuid
   # Las mismas respuestas de comun.yaml, declaradas aquí sobre el alias Problema para que el código generado no invente modelos.
   responses:
     NoAutenticado:
@@ -724,3 +827,30 @@ components:
         minutos:
           type: integer
           format: int32
+    EstadoInterno:
+      type: object
+      required: [vigente, minutos]
+      properties:
+        vigente:
+          type: boolean
+        minutos:
+          type: integer
+          format: int32
+          description: Minutos de inactividad vigentes (el gateway mide la inactividad con ellos).
+        uid:
+          type: [integer, 'null']
+          format: int64
+        motivo:
+          type: [string, 'null']
+          description: Si no es vigente, el `motivo` del 401 (tabla del encabezado).
+          enum: [sin_sesion, inactividad, inactivo, clave, cerrada, reemplazada, clave_vencida, cambio_clave, bloqueado, null]
+        mensaje:
+          type: [string, 'null']
+          description: Si no es vigente, el texto del 401.
+    CierreInterno:
+      type: object
+      required: [motivo]
+      properties:
+        motivo:
+          type: string
+          enum: [salida, inactividad]
