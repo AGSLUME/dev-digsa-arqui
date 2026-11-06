@@ -87,6 +87,17 @@ NOTIFICACIONES_DB_CLAVE_DDL=$(clave)
 RABBITMQ_CLAVE_ADMIN=$(clave)
 REDIS_CLAVE_GATEWAY=$(clave)
 GRAFANA_CLAVE_ADMIN=$(clave)
+# Usuarios de RabbitMQ por servicio (ADR-006)
+SEGURIDAD_RABBIT_USUARIO=seguridad
+SEGURIDAD_RABBIT_CLAVE=$(clave)
+VISITAS_RABBIT_USUARIO=visitas
+VISITAS_RABBIT_CLAVE=$(clave)
+REPORTES_RABBIT_USUARIO=reportes
+REPORTES_RABBIT_CLAVE=$(clave)
+NOTIFICACIONES_RABBIT_USUARIO=notificaciones
+NOTIFICACIONES_RABBIT_CLAVE=$(clave)
+GATEWAY_RABBIT_USUARIO=gateway
+GATEWAY_RABBIT_CLAVE=$(clave)
 
 # Andamiaje del emisor (I1; S1 lo reemplaza). {noop} solo se admite en local.
 LUME_GATEWAY_SECRETO=$secreto_gateway
