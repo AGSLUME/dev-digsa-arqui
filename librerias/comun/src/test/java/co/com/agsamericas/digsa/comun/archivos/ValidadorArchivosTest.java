@@ -433,6 +433,92 @@ class ValidadorArchivosTest {
         assertThat(ValidadorArchivos.dimensiones(resultado[0].contenido())).as("sigue enderezando con el XMP presente").containsExactly(20, 40);
     }
 
+    // ---------------------------------------------------------------- tiposAdmitidos y OLE con macros (revisión de seguridad VA2)
+
+    @Test
+    void tiposAdmitidosEsUnMapaInmutableExtensionAContentType() {
+        java.util.Map<String, String> t = ValidadorArchivos.tiposAdmitidos();
+
+        assertThat(t).containsEntry("pdf", "application/pdf")
+                .containsEntry("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                .containsEntry("jpg", "image/jpeg")
+                .containsEntry("md", "text/markdown");
+        assertThat(t.keySet()).containsExactlyInAnyOrderElementsOf(ValidadorArchivos.TIPOS.values());
+        assertThat(t.values()).containsExactlyInAnyOrderElementsOf(ValidadorArchivos.TIPOS.keySet());
+        assertThat(t.values()).noneMatch(v -> v.contains("x-tika"));
+        assertThatThrownBy(() -> t.put("exe", "application/x-msdownload")).isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> t.remove("pdf")).isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(t::clear).isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    /** OLE2 con las entradas dadas; un nombre con "/" crea el directorio y la subentrada (p. ej. "Macros/VBA"). */
+    private static byte[] ole(String... entradas) throws IOException {
+        try (org.apache.poi.poifs.filesystem.POIFSFileSystem fs = new org.apache.poi.poifs.filesystem.POIFSFileSystem()) {
+            for (String e : entradas) {
+                org.apache.poi.poifs.filesystem.DirectoryEntry dir = fs.getRoot();
+                String[] partes = e.split("/");
+                for (int i = 0; i < partes.length - 1; i++) {
+                    dir = dir.hasEntry(partes[i])
+                            ? (org.apache.poi.poifs.filesystem.DirectoryEntry) dir.getEntry(partes[i])
+                            : dir.createDirectory(partes[i]);
+                }
+                dir.createDocument(partes[partes.length - 1], new java.io.ByteArrayInputStream(new byte[4096]));
+            }
+            ByteArrayOutputStream b = new ByteArrayOutputStream();
+            fs.writeFilesystem(b);
+            return b.toByteArray();
+        }
+    }
+
+    @Test
+    void unDocYUnXlsLimpiosSonDelTipoEsperadoYPasan() throws IOException {
+        byte[] doc = ole("WordDocument", "1Table");
+        byte[] xls = ole("Workbook");
+        assertThat(validador.tipo(doc, "x.doc")).isEqualTo("application/msword");
+        assertThat(validador.tipo(xls, "x.xls")).isEqualTo("application/vnd.ms-excel");
+
+        assertThat(validador.validar("x.doc", doc).extension()).isEqualTo("doc");
+        assertThat(validador.validar("x.xls", xls).extension()).isEqualTo("xls");
+    }
+
+    private void rechazaOleConEntradaPeligrosa(String nombre, String tipoEsperado, String... entradas) throws IOException {
+        byte[] bytes = ole(entradas);
+        // Precondición con Tika directo: tipo() ya aplica el filtro de macros y por eso no devuelve Word ni Excel para estos archivos
+        assertThat(new org.apache.tika.Tika().detect(bytes, nombre)).as("precondición: Tika lo reconoce como " + tipoEsperado).isEqualTo(tipoEsperado);
+        assertThatThrownBy(() -> validador.validar(nombre, bytes))
+                .as(nombre + " con " + String.join(",", entradas))
+                .isInstanceOfSatisfying(ErrorNegocio.class, e -> {
+                    assertThat(e.estado()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+                    assertThat(e.getMessage()).isEqualTo(NO_ADMITIDO.formatted(nombre));
+                });
+    }
+
+    @Test
+    void unDocConMacrosOConObjetosIncrustadosSeRechazaCon422() throws IOException {
+        rechazaOleConEntradaPeligrosa("a.doc", "application/msword", "WordDocument", "Macros/VBA");
+        rechazaOleConEntradaPeligrosa("b.doc", "application/msword", "WordDocument", "Macros");
+        rechazaOleConEntradaPeligrosa("c.doc", "application/msword", "WordDocument", "ObjectPool/_1234567890");
+    }
+
+    @Test
+    void unXlsConProyectoVbaOConObjetosIncrustadosSeRechazaCon422() throws IOException {
+        rechazaOleConEntradaPeligrosa("d.xls", "application/vnd.ms-excel", "Workbook", "_VBA_PROJECT_CUR/VBA");
+        rechazaOleConEntradaPeligrosa("e.xls", "application/vnd.ms-excel", "Workbook", "_VBA_PROJECT_CUR");
+        rechazaOleConEntradaPeligrosa("f.xls", "application/vnd.ms-excel", "Workbook", "ObjectPool/_1234567890");
+    }
+
+    @Test
+    void unOleDeMasDe25MbEs413SinAnalizarSusEntradas() throws IOException {
+        byte[] grande = Arrays.copyOf(ole("WordDocument", "Macros/VBA"), (int) ValidadorArchivos.MAX_ARCHIVO + 1);
+
+        // Con macros el análisis daría 422; el tope va antes y da 413
+        assertThatThrownBy(() -> validador.validar("grande.doc", grande))
+                .isInstanceOfSatisfying(ErrorNegocio.class, e -> {
+                    assertThat(e.estado()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
+                    assertThat(e.getMessage()).isEqualTo("El archivo «grande.doc» pesa más de 25 MB.");
+                });
+    }
+
     private static String nombreMostrado(String mensaje) {
         int a = mensaje.indexOf('«');
         int b = mensaje.lastIndexOf('»');
