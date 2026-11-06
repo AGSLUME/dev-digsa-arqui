@@ -91,7 +91,13 @@ public class AlmacenJwk implements JWKSource<SecurityContext> {
             if (c == null || c.claves().isEmpty()) {
                 rotarSiHaceFalta();
             }
-            c = new Cargadas(leer(ahora), ahora.plus(RELEER));
+            List<JWK> leidas = leer(ahora);
+            if (leidas.stream().noneMatch(JWK::isPrivate)) {
+                // Sin clave para firmar (la vigente no descifra): rotar y volver a leer
+                rotarSiHaceFalta();
+                leidas = leer(ahora);
+            }
+            c = new Cargadas(leidas, ahora.plus(RELEER));
             cargadas = c;
         }
         return c.claves();
@@ -103,18 +109,21 @@ public class AlmacenJwk implements JWKSource<SecurityContext> {
         tx.executeWithoutResult(s -> {
             jdbc.sql("SELECT pg_advisory_xact_lock(:k)").param("k", BLOQUEO_ROTACION).query(Object.class).optional();
             Instant ahora = reloj.instant();
-            var vigente = jdbc.sql("SELECT kid, creada FROM jwk WHERE retirada IS NULL")
-                    .query((rs, n) -> new Object[]{rs.getString(1), rs.getTimestamp(2).toInstant()}).optional();
-            if (vigente.isPresent() && ((Instant) vigente.get()[1]).plus(rotarCada).isAfter(ahora)) {
+            var vigente = jdbc.sql("SELECT kid, creada, privada_cifrada FROM jwk WHERE retirada IS NULL")
+                    .query((rs, n) -> new Object[]{rs.getString(1), rs.getTimestamp(2).toInstant(), rs.getBytes(3)}).optional();
+            // Una vigente que no descifra (fila basura dejada con la función) no sirve: se rota ya, no a los 30 días (disponibilidad)
+            boolean valida = vigente.isPresent() && descifra((String) vigente.get()[0], (byte[]) vigente.get()[2]);
+            if (valida && ((Instant) vigente.get()[1]).plus(rotarCada).isAfter(ahora)) {
                 return;
             }
             RSAKey nueva = generar();
-            // La aplicación no escribe en jwk (V4): la función retira la vigente, inserta la nueva y borra las retiradas vencidas
-            jdbc.sql("SELECT jwk_rotar(:k, :pub, :priv, :ahora, :hasta)")
+            // La aplicación no escribe en jwk (V4, V5): la función retira la vigente, inserta la nueva y borra las retiradas vencidas, con
+            // los tiempos de la base (no recibe horas por parámetro)
+            jdbc.sql("SELECT jwk_rotar(:k, :pub, :priv)")
                     .param("k", nueva.getKeyID()).param("pub", nueva.toPublicJWK().toJSONString())
-                    .param("priv", cifrar(nueva.getKeyID(), privada(nueva).getEncoded())).param("ahora", ahora.atOffset(ZoneOffset.UTC))
-                    .param("hasta", ahora.plus(PUBLICAR_RETIRADA).atOffset(ZoneOffset.UTC)).query(Object.class).optional();
-            LOG.info("[jwk] Clave de firma nueva {}{}", nueva.getKeyID(), vigente.map(v -> " (retirada " + v[0] + ")").orElse(""));
+                    .param("priv", cifrar(nueva.getKeyID(), privada(nueva).getEncoded())).query(Object.class).optional();
+            LOG.info("[jwk] Clave de firma nueva {}{}", nueva.getKeyID(), vigente.map(v -> " (retirada " + v[0] + (valida ? "" : ", no descifraba")
+                    + ")").orElse(""));
         });
         cargadas = null;
     }
@@ -131,8 +140,7 @@ public class AlmacenJwk implements JWKSource<SecurityContext> {
         }
         List<Fila> filas = jdbc.sql("""
                 SELECT kid, privada_cifrada, retirada IS NULL AS vigente FROM jwk
-                WHERE retirada IS NULL OR publicar_hasta >= :a ORDER BY (retirada IS NULL) DESC, creada DESC""")
-                .param("a", ahora.atOffset(ZoneOffset.UTC))
+                WHERE retirada IS NULL OR publicar_hasta >= now() ORDER BY (retirada IS NULL) DESC, creada DESC""")
                 .query((rs, n) -> new Fila(rs.getString("kid"), rs.getBytes("privada_cifrada"), rs.getBoolean("vigente"))).list();
         for (Fila f : filas) {
             RSAKey clave;
@@ -147,6 +155,16 @@ public class AlmacenJwk implements JWKSource<SecurityContext> {
             r.add(f.vigente() ? clave : clave.toPublicJWK());
         }
         return List.copyOf(r);
+    }
+
+    /** ¿La privada cifrada descifra con la clave del entorno y su kid? */
+    private boolean descifra(String kid, byte[] privada) {
+        try {
+            desdePrivada(kid, descifrar(kid, privada));
+            return true;
+        } catch (GeneralSecurityException | RuntimeException e) {
+            return false;
+        }
     }
 
     /** La clave RSA completa a partir de la privada PKCS#8: la pública sale del módulo y el exponente público de la privada (CRT). */

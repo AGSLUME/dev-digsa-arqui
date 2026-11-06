@@ -28,10 +28,9 @@ class FiltroAutenticacionReciente extends OncePerRequestFilter {
         this.reloj = reloj;
     }
 
-    @Override
-    protected boolean shouldNotFilter(HttpServletRequest req) {
-        return !"/oauth2/authorize".equals(req.getRequestURI().substring(req.getContextPath().length()));
-    }
+    // Sin shouldNotFilter (revisión de la integradora sobre S1.7): aplica a TODA la cadena del emisor (su securityMatcher son los endpoints
+    // de Spring Authorization Server). Comparar la ruta aquí abría un bypass: «/oauth2/%61uthorize» no era igual en crudo, pero el emisor
+    // la decodifica y la atiende. Ningún otro endpoint del emisor usa la sesión autenticada, así que descartarla allí no cambia nada.
 
     @Override
     protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain) throws ServletException, IOException {

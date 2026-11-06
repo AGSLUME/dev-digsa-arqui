@@ -71,7 +71,7 @@ public abstract class PruebaIntegracion {
     }
 
     @TestConfiguration(proxyBeanMethods = false)
-    static class Dobles {
+    public static class Dobles {
 
         /** También es el puerto {@code CorreoSeguridad} del servicio (lo implementa). */
         @Bean

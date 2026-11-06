@@ -165,23 +165,23 @@ class TokensTest extends PruebaIntegracion {
     }
 
     @Test
-    @DisplayName("M2: una clave plantada en jwk (sin la clave de cifrado del entorno) ni se publica ni firma")
+    @DisplayName("M2: una clave plantada en jwk (sin la clave de cifrado del entorno) no se publica; el emisor rota de inmediato y sigue firmando")
     void unaClavePlantadaNoSePublica() throws Exception {
         var u = datos.usuario();
         String legitima = encabezado(ingresarYCanjear(u).acceso()).get("kid").asString();
         // El atacante (con la credencial de la aplicación) usa la función de rotación con su propia pública y un cifrado inventado
         var ajena = new com.nimbusds.jose.jwk.gen.RSAKeyGenerator(2048).keyID("plantada").generate();
-        var ahora = reloj.instant().atOffset(java.time.ZoneOffset.UTC);
-        jdbc.sql("SELECT jwk_rotar('plantada', :pub, :priv, :a, :h)").param("pub", ajena.toPublicJWK().toJSONString())
-                .param("priv", new byte[64]).param("a", ahora).param("h", ahora.plusHours(24)).query(Object.class).optional();
+        jdbc.sql("SELECT jwk_rotar('plantada', :pub, :priv)").param("pub", ajena.toPublicJWK().toJSONString())
+                .param("priv", new byte[64]).query(Object.class).optional();
         AlmacenJwk otro = new AlmacenJwk(jdbc, contexto.getBean(org.springframework.transaction.support.TransactionTemplate.class), reloj,
                 "cHJ1ZWJhLXNvbG8tcHJ1ZWJhLXNvbG8tcHJ1ZWJhLTE=", 30);
         var publicadas = otro.claves();
         assertThat(publicadas).extracting(com.nimbusds.jose.jwk.JWK::getKeyID).doesNotContain("plantada").contains(legitima);
-        assertThat(publicadas).noneMatch(com.nimbusds.jose.jwk.JWK::isPrivate); // la vigente es la plantada: nadie firma (falla cerrado)
-        // Deja el almacén como estaba para las demás pruebas: una clave vigente legítima
-        envejecerVigente();
+        // La vigente plantada no descifra: se rotó en el acto (no a los 30 días) y hay una clave legítima para firmar
+        assertThat(publicadas).anyMatch(com.nimbusds.jose.jwk.JWK::isPrivate);
+        assertThat(jdbc.sql("SELECT kid FROM jwk WHERE retirada IS NULL").query(String.class).single()).isNotEqualTo("plantada");
         almacen.rotarSiHaceFalta();
+        assertThat(encabezado(ingresarYCanjear(datos.usuario()).acceso()).get("kid").asString()).isNotEqualTo("plantada");
     }
 
     /** Adelanta el reloj hasta 31 días después de la creación de la clave vigente (rotación sin escribir en jwk). */
