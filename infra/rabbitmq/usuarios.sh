@@ -1,16 +1,22 @@
 #!/bin/sh
 # ADR-006: un usuario de RabbitMQ por servicio, con permisos mínimos (vhost /). Para el servicio X:
-#   configurar  ^X\..+$                     su exchange X.eventos y sus colas X.<algo> (+ .reintento, .dlq). Nada ajeno.
+#   configurar  ^X\..+$                     su exchange X.eventos y sus colas X.<algo> (+ .reintento, .dlq, .dlx). Nada ajeno.
 #   escribir    ^X\..+$                     solo publica en SU exchange (nadie publica en nombre de otro) y enlaza sus colas.
-#   leer        ^(X\..+|[a-z-]+\.eventos)$  consume sus colas y puede enlazarlas a los exchanges *.eventos de los demás.
+#   leer        ^(X\..+|[a-z-]+\.eventos)$  consume sus colas y puede enlazarlas a los exchanges *.eventos de los demás...
+# ...pero SOLO con las claves que permite la matriz de lectura (topic permissions, más abajo): sin ella, cualquier servicio podría
+# enlazar seguridad.eventos con "#" y recibir la foto de todos los usuarios con documento y correo (Ley 1581; lo detectó seguridad).
 # El reintento con TTL y la DLQ usan un exchange directo propio <svc>.<cola>.dlx (no el exchange por defecto): RabbitMQ exige
 # escritura sobre el dead-letter exchange al declarar la cola, y ^X\..+$ no cubre amq.default (lo detectó seguridad, S2-OUTBOX).
-# Corre dentro del contenedor, en segundo plano, cuando el nodo responde. Es idempotente (re-crea la clave si ya existe).
+# Corre dentro del contenedor, en segundo plano, cuando el nodo responde. Es idempotente.
 set -eu
 
 export HOME=/var/lib/rabbitmq
 
 until rabbitmq-diagnostics -q check_running >/dev/null 2>&1; do sleep 2; done
+
+SERVICIOS="seguridad visitas reportes notificaciones gateway"
+PUBLICADORES="seguridad visitas reportes notificaciones"
+NADA='^$'
 
 usuario() {
   nombre="$1"
@@ -23,11 +29,42 @@ usuario() {
   rabbitmqctl -q set_permissions -p / "$nombre" "^${nombre}\\..+\$" "^${nombre}\\..+\$" "^(${nombre}\\..+|[a-z-]+\\.eventos)\$" >/dev/null
 }
 
+# Permiso por tema: qué claves puede ESCRIBIR (publicar) y LEER (enlazar) el usuario en ese exchange.
+tema() {
+  rabbitmqctl -q set_topic_permissions -p / "$1" "$2" "$3" "$4" >/dev/null
+}
+
+# Administrador: con definiciones al arrancar, RabbitMQ ya no crea el usuario por defecto (RABBITMQ_DEFAULT_USER/PASS).
+if [ -z "${RABBITMQ_DEFAULT_PASS:-}" ]; then echo "usuarios.sh: falta RABBITMQ_DEFAULT_PASS" >&2; exit 1; fi
+rabbitmqctl -q add_user "${RABBITMQ_DEFAULT_USER:-lume_admin}" "$RABBITMQ_DEFAULT_PASS" >/dev/null 2>&1 \
+  || rabbitmqctl -q change_password "${RABBITMQ_DEFAULT_USER:-lume_admin}" "$RABBITMQ_DEFAULT_PASS" >/dev/null
+rabbitmqctl -q set_user_tags "${RABBITMQ_DEFAULT_USER:-lume_admin}" administrator >/dev/null
+rabbitmqctl -q set_permissions -p / "${RABBITMQ_DEFAULT_USER:-lume_admin}" '.*' '.*' '.*' >/dev/null
+
 usuario seguridad "${SEGURIDAD_RABBIT_CLAVE:-}"
 usuario visitas "${VISITAS_RABBIT_CLAVE:-}"
 usuario reportes "${REPORTES_RABBIT_CLAVE:-}"
 usuario notificaciones "${NOTIFICACIONES_RABBIT_CLAVE:-}"
 usuario gateway "${GATEWAY_RABBIT_CLAVE:-}"
 
+# 1) Por omisión, nada: sin un permiso por tema, RabbitMQ deja enlazar cualquier clave. Cada publicador escribe cualquier clave en
+#    su propio exchange; nadie lee nada de nadie hasta la matriz.
+for u in $SERVICIOS; do
+  for p in $PUBLICADORES; do
+    if [ "$u" = "$p" ]; then tema "$u" "${p}.eventos" '.*' "$NADA"; else tema "$u" "${p}.eventos" "$NADA" "$NADA"; fi
+  done
+done
+
+# 2) Matriz de lectura (lo que cada consumidor necesita; una clave nueva se pide a la integradora).
+tema gateway seguridad.eventos "$NADA" '^(sesion\..*|usuario\.(permisos_cambiados|estado_cambiado))$'
+tema visitas seguridad.eventos "$NADA" '^(usuario|cuenta)\..*$'
+tema reportes seguridad.eventos "$NADA" '^(usuario|cuenta)\..*$'
+tema reportes visitas.eventos "$NADA" '^(visita|hallazgo)\..*$'
+tema notificaciones visitas.eventos "$NADA" '^(alerta|aviso)\..*$'
+# seguridad consume la auditoría de todos (ADR-002/006); en su propio exchange conserva la escritura
+for p in visitas reportes notificaciones; do
+  tema seguridad "${p}.eventos" "$NADA" '^auditoria\..*$'
+done
+
 touch /var/lib/rabbitmq/.usuarios-lume-listos
-echo "usuarios.sh: usuarios de servicio listos"
+echo "usuarios.sh: usuarios de servicio y matriz de lectura listos"

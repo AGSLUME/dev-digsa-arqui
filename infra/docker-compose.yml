@@ -54,9 +54,12 @@ services:
     volumes:
       - rabbitmq-datos:/var/lib/rabbitmq
       - ./rabbitmq/usuarios.sh:/opt/lume/usuarios.sh:ro
+      - ./rabbitmq/10-lume.conf:/etc/rabbitmq/conf.d/10-lume.conf:ro
+      - ./rabbitmq/definiciones.json:/etc/rabbitmq/definiciones.json:ro
     healthcheck:
       # Sano solo cuando el nodo responde Y ya existen los usuarios de servicio (así --wait no arranca servicios antes)
       test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping && test -f /var/lib/rabbitmq/.usuarios-lume-listos"]
+      start_period: 60s
       interval: 10s
       timeout: 5s
       retries: 12

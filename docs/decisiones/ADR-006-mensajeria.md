@@ -14,6 +14,19 @@ Hay flujos asíncronos entre servicios: auditoría (todos → `seguridad`), corr
 - Formato del mensaje: JSON con sobre común `{id, tipo, version, ocurrido, origen, traza, datos}`. Los esquemas de eventos se documentan en `contratos/eventos/*.yaml` (AsyncAPI o JSON Schema) junto a los OpenAPI.
 - Comandos con respuesta inmediata (por ejemplo enviar el código MFA) **no** van por mensajería: son llamadas HTTP síncronas con Resilience4j (ADR-009). La mensajería es para hechos ya ocurridos.
 - **Un usuario de RabbitMQ por servicio**, con escritura solo en su propio exchange. El consumidor valida que `origen` coincida con el exchange del que llega (evita que un servicio publique auditoría en nombre de otro).
+  - Implementado en `infra/rabbitmq/` (2026-11-06): los exchanges `<origen>.eventos` (topic, durable, `alternate-exchange <origen>.sin-ruta`) los declara la infraestructura al arrancar y cada publicador los vuelve a declarar con los mismos argumentos; el consumidor no declara exchanges ajenos, solo sus colas `<servicio>.<cola>` (+ `.reintento`, `.dlq`, `.dlx` propio) y el binding.
+  - **Matriz de lectura por tema** (`set_topic_permissions`): sin ella cualquier servicio podría enlazar `seguridad.eventos` con `#` y recibir las fotos de usuario con documento y correo (Ley 1581; lo detectó seguridad). Todo lo no listado está cerrado:
+
+    | Exchange | Lee | Claves |
+    |---|---|---|
+    | `seguridad.eventos` | gateway | `sesion.*`, `usuario.permisos_cambiados`, `usuario.estado_cambiado` |
+    | `seguridad.eventos` | visitas, reportes | `usuario.*`, `cuenta.*` |
+    | `visitas.eventos` | reportes | `visita.*`, `hallazgo.*` |
+    | `visitas.eventos` | notificaciones | `alerta.*`, `aviso.*` |
+    | `visitas`/`reportes`/`notificaciones.eventos` | seguridad | `auditoria.*` |
+
+  - Convención de claves: lo que debe notificarse a una persona sale como `aviso.<tipo>` (p. ej. `aviso.solicitud_nueva`) y lo crítico como `alerta.<tipo>`; la auditoría como `auditoria.<tipo>`. Una clave o un consumidor nuevo se pide a la integradora, que amplía la matriz.
+  - Tope de mensaje 256 KiB (`max_message_size`). TLS de AMQP en el cierre (I9).
 - Los mensajes no llevan secretos en claro (códigos, enlaces, contraseñas) ni datos personales que no se necesiten.
 
 ## Consecuencias
