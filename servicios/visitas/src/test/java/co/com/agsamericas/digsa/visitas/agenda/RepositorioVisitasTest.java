@@ -318,6 +318,54 @@ class RepositorioVisitasTest extends FixturaAgenda {
     }
 
     @Test
+    @DisplayName("equipo: un integrante que aún no está en usuarios_copia (copia atrasada) aparece como «Usuario no sincronizado», activo, con su rol y orden")
+    void equipoConIntegranteNoSincronizado() {
+        long lider = sembrarAuditor("Líder sincronizado", true);
+        long a1 = sembrarAuditor("Apoyo sincronizado", true);
+        long fantasma = nuevoUid(); // no está en usuarios_copia
+        long fantasmaSinRol = nuevoUid();
+        jdbc.sql("INSERT INTO auditores (usuario_id, rol) VALUES (:u, 'auditor_salud')").param("u", fantasma).update();
+        long id = sembrarVisita("anual", punto(), lider, FECHA);
+        repo.reemplazarEquipo(id, lider, List.of(a1));
+        jdbc.sql("INSERT INTO visitas_auditores (visita_id, usuario_id, funcion, orden) VALUES (:v, :u, 'apoyo', 2)")
+                .param("v", id).param("u", fantasma).update();
+        jdbc.sql("INSERT INTO visitas_auditores (visita_id, usuario_id, funcion, orden) VALUES (:v, :u, 'apoyo', 3)")
+                .param("v", id).param("u", fantasmaSinRol).update();
+
+        var eq = repo.equipo(id);
+        assertThat(eq).extracting(RepositorioVisitas.Miembro::id).containsExactly(lider, a1, fantasma, fantasmaSinRol);
+        assertThat(eq).extracting(RepositorioVisitas.Miembro::orden).containsExactly(0, 1, 2, 3);
+        assertThat(eq).extracting(RepositorioVisitas.Miembro::funcion).containsExactly("lider", "apoyo", "apoyo", "apoyo");
+
+        var m = eq.get(2);
+        assertThat(m.nombre()).isEqualTo("Usuario no sincronizado");
+        assertThat(m.usuario()).isNullOrEmpty();
+        assertThat(m.correo()).isNull();
+        assertThat(m.documento()).isNull();
+        assertThat(m.activo()).as("la copia va atrasada: no se le trata como inactivo").isTrue();
+        assertThat(m.rol()).isEqualTo("auditor_salud");
+        assertThat(eq.get(3).rol()).as("sin fila en auditores: otro").isEqualTo("otro");
+        assertThat(eq.get(3).nombre()).isEqualTo("Usuario no sincronizado");
+        assertThat(eq.get(3).activo()).isTrue();
+
+        assertThat(repo.esDelEquipo(id, fantasma)).isTrue();
+        repo.reemplazarReparto(id, Map.of("C01", lider, "C02", a1), Map.of());
+        jdbc.sql("INSERT INTO visitas_reparto (visita_id, parte, usuario_id, asignado_por) VALUES (:v, 'OBL', :u, 'sistema')")
+                .param("v", id).param("u", fantasma).update();
+        assertThat(repo.partesDe(id, fantasma)).containsExactly("OBL");
+    }
+
+    @Test
+    @DisplayName("auditoresActivos: un uid que no está en usuarios_copia NO se incluye (para asignaciones nuevas falla cerrado)")
+    void auditoresActivosExcluyeAlNoSincronizado() {
+        long conocido = sembrarAuditor("Conocido", true);
+        long fantasma = nuevoUid();
+        jdbc.sql("INSERT INTO auditores (usuario_id, rol) VALUES (:u, 'regente')").param("u", fantasma).update();
+        assertThat(repo.auditoresActivos(List.of(fantasma))).isEmpty();
+        assertThat(repo.auditoresActivos(List.of(conocido, fantasma))).containsOnlyKeys(conocido);
+    }
+
+    @Test
     @DisplayName("reparto: reemplazar, leer, mover una parte y partesDe; reemplazar el equipo borra el reparto")
     void reparto() {
         long lider = sembrarAuditor("Líder", true);
