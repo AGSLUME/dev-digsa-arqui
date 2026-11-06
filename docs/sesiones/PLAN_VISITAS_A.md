@@ -136,6 +136,12 @@
 
 - `maestros/carga`: CLI con simular y aplicar, todo o nada, candado consultivo, informe CSV neutralizado y los códigos de salida 0 a 4, con las reglas de `reglas/ImportadorMaestros`.
 - Los usuarios del archivo van por `/interno/usuarios/importar` de seguridad (`seguridad:importar`).
+- Orden aprobado (integradora): validar las hojas → en mi transacción, puntos y auditores → último paso antes del commit,
+  `/interno/usuarios/importar` (con timeout, Resilience4j) → si falla, rollback. `simular=true` sin efectos. Riesgo residual aceptado
+  (seguridad confirmó y mi commit falla): la carga es idempotente; alerta al administrador por `alerta.*` y nota en el README.
+- Decisiones del usuario (las aplica seguridad; el informe por fila debe mostrarlas): por carga solo se asignan perfiles locales (ESM,
+  OPL, Sanidad, Auditor…); Coordinador, DIGSA, Analista y Administrador se rechazan en la fila. La carga no reactiva a un usuario
+  inactivo: la fila sale con aviso y su estado no cambia.
 - Pruebas: port de `CargaMaestrosTest`.
 
 ## VA3 · Pantallas Angular y e2e

@@ -17,6 +17,8 @@ import org.testcontainers.utility.MountableFile;
  *   <li>RabbitMQ: la misma imagen, el mismo {@code command} y los mismos tres archivos del compose ({@code usuarios.sh},
  *       {@code 10-lume.conf} y {@code definiciones.json}). La aplicación se conecta como {@code visitas}, no como administrador.</li>
  * </ul>
+ * Los contenedores son <b>uno por JVM</b>, compartidos por todos los contextos de prueba (p. ej. el del perfil «otro»): levantar otro
+ * RabbitMQ por contexto tarda minutos con el equipo cargado. Los detiene Testcontainers (Ryuk) al terminar la JVM.
  * Las claves son ficticias, solo de prueba.
  */
 @TestConfiguration(proxyBeanMethods = false)
@@ -38,18 +40,31 @@ public class ContenedoresPrueba {
     public static final String ADMIN_CLAVE = "admin-rabbit-solo-prueba";
     private static final String CLAVE_RABBIT = "visitas-rabbit-solo-prueba";
 
-    @Bean(initMethod = "start", destroyMethod = "stop")
+    private static PostgreSQLContainer postgresCompartido;
+    private static RabbitMQContainer rabbitmqCompartido;
+
+    @Bean(destroyMethod = "")
     PostgreSQLContainer postgres() {
+        return postgresCompartido();
+    }
+
+    private static synchronized PostgreSQLContainer postgresCompartido() {
+        if (postgresCompartido != null) {
+            return postgresCompartido;
+        }
         PostgreSQLContainer c = new PostgreSQLContainer(POSTGRES)
                 .withDatabaseName("lume")
                 .withUsername("lume_admin")
                 .withPassword("admin-solo-prueba")
                 .withCopyFileToContainer(MountableFile.forHostPath("../../infra/postgres/init/01-esquemas.sh", 0755),
-                        "/docker-entrypoint-initdb.d/01-esquemas.sh");
+                        "/docker-entrypoint-initdb.d/01-esquemas.sh")
+                .withStartupTimeout(java.time.Duration.ofMinutes(5));
         for (String svc : new String[]{"SEGURIDAD", "VISITAS", "REPORTES", "NOTIFICACIONES"}) {
             c.withEnv(svc + "_DB_CLAVE", svc.toLowerCase() + "-app-solo-prueba");
             c.withEnv(svc + "_DB_CLAVE_DDL", svc.toLowerCase() + "-ddl-solo-prueba");
         }
+        c.start();
+        postgresCompartido = c;
         return c;
     }
 
@@ -64,8 +79,15 @@ public class ContenedoresPrueba {
         };
     }
 
-    @Bean(destroyMethod = "stop")
+    @Bean(destroyMethod = "")
     RabbitMQContainer rabbitmq() throws Exception {
+        return rabbitmqCompartido();
+    }
+
+    private static synchronized RabbitMQContainer rabbitmqCompartido() throws Exception {
+        if (rabbitmqCompartido != null) {
+            return rabbitmqCompartido;
+        }
         RabbitMQContainer c = new RabbitMQContainer(RABBITMQ)
                 // Los mismos tres archivos que el compose: matriz de permisos (ADR-006), exchanges declarados al arrancar y tope de mensaje
                 .withCopyFileToContainer(MountableFile.forHostPath("../../infra/rabbitmq/usuarios.sh", 0755), "/opt/lume/usuarios.sh")
@@ -74,18 +96,22 @@ public class ContenedoresPrueba {
                 // Con definiciones al arrancar no existe el usuario por defecto: usuarios.sh crea al administrador con estas variables
                 .withAdminUser(ADMIN_USUARIO).withAdminPassword(ADMIN_CLAVE)
                 // El mismo command del compose: gosu hace que usuarios.sh corra como rabbitmq
-                .withCommand("sh", "-c", "gosu rabbitmq /opt/lume/usuarios.sh & exec docker-entrypoint.sh rabbitmq-server");
+                .withCommand("sh", "-c", "gosu rabbitmq /opt/lume/usuarios.sh & exec docker-entrypoint.sh rabbitmq-server")
+                // Con varias sesiones probando a la vez, el broker puede tardar más del minuto por omisión en decir «Server startup complete»
+                .withStartupTimeout(java.time.Duration.ofMinutes(5));
         for (String svc : new String[]{"SEGURIDAD", "VISITAS", "REPORTES", "NOTIFICACIONES", "GATEWAY"}) {
             c.withEnv(svc + "_RABBIT_CLAVE", svc.toLowerCase() + "-rabbit-solo-prueba");
         }
         c.start();
-        long limite = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(240);
+        // Con el equipo cargado cada rabbitmqctl tarda segundos: 480 s de margen para crear todos los usuarios
+        long limite = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(480);
         while (c.execInContainer("test", "-f", "/var/lib/rabbitmq/.usuarios-lume-listos").getExitCode() != 0) {
             if (System.nanoTime() > limite) {
                 throw new IllegalStateException("usuarios.sh no creó los usuarios de RabbitMQ a tiempo");
             }
             Thread.sleep(500);
         }
+        rabbitmqCompartido = c;
         return c;
     }
 
