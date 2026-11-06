@@ -44,6 +44,12 @@ Leer junto con `docs/decisiones/` (ADR-001..014) y `librerias/comun/README.md`. 
 - Frontend: las pantallas van en `frontend/src/app/paginas/visitas/` según `frontend/README.md` («Agregar pantallas»), con el design system de `ui/` y el registro de rutas `rutas-modulos.ts` (cada sesión edita solo su bloque).
 - Puertos: los de su desfase en `infra/.env` (ya generado; no regenerarlo).
 
+## Datos personales en logs (regla común, 2026-11-06; aplica a todas las sesiones)
+
+- Los **modelos generados desde `contratos/`** (`*.api.modelo.*`) y los cuerpos de petición o respuesta **nunca** se escriben en logs, en mensajes de excepción ni en la bitácora: su `toString()` generado imprime todos los campos, incluidos documento, correo, teléfono y nombre. Para trazar, se usan identificadores (`uid`, `id` de visita, `fila`).
+- Lo mismo para los registros propios con datos personales: su `toString()` omite documento, correo y teléfono (como `UsuarioCopia` y `Foto` de comun).
+- La revisión de seguridad de cada entrega lo verifica (búsqueda de `log.*(` con modelos o cuerpos).
+
 ## Entregas
 
 Como en la oleada 1: plan aprobado antes de programar; por fase, hash + pruebas por módulo (contadas desde los `TEST-*.xml`) + `npm audit` completo si toca frontend + dudas. La integradora revisa con revisor-codigo y seguridad, verifica en limpio y hace el merge.
