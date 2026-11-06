@@ -86,5 +86,12 @@ public abstract class PruebaIntegracion {
         RelojMovible relojMovible() {
             return new RelojMovible(Fechas.BOGOTA);
         }
+
+        /** El publicador de auditoría del servicio: las pruebas leen la bitácora. */
+        @Bean
+        @Primary
+        BitacoraCapturada bitacoraCapturada() {
+            return new BitacoraCapturada();
+        }
     }
 }
