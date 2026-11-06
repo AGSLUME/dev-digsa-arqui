@@ -98,6 +98,16 @@ spring:
                 - TokenRelay=
                 - RemoveRequestHeader=Cookie
                 - RemoveResponseHeader=Set-Cookie
+            # visitas (ADR-002): paquetes de visitas-a. Las rutas de visitas-b se agregan aquí cuando existan.
+            - id: visitas
+              uri: ${LUME_VISITAS_URL:http://localhost:9102}
+              predicates:
+                - Path=/api/catalogos,/api/catalogos/**,/api/maestros,/api/maestros/**,/api/agenda,/api/agenda/**,/api/calendario,/api/calendario/**,/api/mis-visitas,/api/mis-visitas/**,/api/solicitudes,/api/solicitudes/**,/api/propuesta,/api/propuesta/**
+              filters:
+                - TokenRelay=
+                - RemoveRequestHeader=Cookie
+                # Un servicio no pone cookies en el origen del BFF (pisarían XSRF-TOKEN o la sesión).
+                - RemoveResponseHeader=Set-Cookie
             - id: hola
               uri: ${LUME_HOLA_URL:http://localhost:9109}
               predicates:

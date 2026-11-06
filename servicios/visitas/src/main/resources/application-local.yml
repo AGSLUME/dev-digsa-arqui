@@ -1,0 +1,11 @@
+# Solo en local (SPRING_PROFILES_ACTIVE=local, lo pone infra/arrancar.sh). Nunca en otro entorno.
+spring:
+  flyway:
+    # Cambiar entre las ramas visitas-a y visitas-b sin recrear la base: se toleran las migraciones aplicadas de la otra rama que aquí
+    # no existen (integradora, revisión M4). Fuera de local, una migración faltante sigue siendo un error.
+    ignore-migration-patterns: "*:missing"
+
+lume:
+  archivos:
+    # Volumen local del servicio (ADR-005): fuera del repositorio.
+    carpeta: ${LUME_ARCHIVOS_VISITAS:${java.io.tmpdir}/lume/visitas/archivos}
