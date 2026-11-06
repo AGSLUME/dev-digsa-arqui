@@ -58,8 +58,7 @@ final class InfraEventos {
                 .withCopyFileToContainer(MountableFile.forHostPath("../../infra/rabbitmq/definiciones.json", 0644), "/etc/rabbitmq/definiciones.json")
                 // Con definiciones al arrancar no existe el usuario por defecto: usuarios.sh crea al administrador con estas variables
                 .withAdminUser(ADMIN_USUARIO).withAdminPassword(ADMIN_CLAVE)
-                // OJO: con "/opt/lume/usuarios.sh &" a secas (como el compose) el script corre como root, crea .erlang.cookie con dueño root y el nodo
-                // (usuario rabbitmq) no arranca (eacces). Aquí el script corre como rabbitmq con gosu.
+                // El mismo command del compose: gosu hace que usuarios.sh corra como rabbitmq (si corre como root, .erlang.cookie queda de root y el nodo no arranca)
                 .withCommand("sh", "-c", "gosu rabbitmq /opt/lume/usuarios.sh & exec docker-entrypoint.sh rabbitmq-server");
         for (String s : SERVICIOS) {
             RABBIT_CONTENEDOR.withEnv(s.toUpperCase() + "_RABBIT_CLAVE", clave(s));
