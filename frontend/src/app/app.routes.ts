@@ -17,6 +17,9 @@ export const routes: Routes = [
   { path: 'olvide-clave', component: OlvideClave },
   { path: 'definir-clave', component: DefinirClave },
   { path: 'sin-conexion', component: SinConexion },
+  // Catálogo de componentes, solo en desarrollo (ng serve): revisión con teclado y lector, y e2e de los componentes sin pantalla aún.
+  // ngDevMode es una constante que el build de producción reemplaza por false: la ruta y su código no llegan al paquete publicado
+  ...(typeof ngDevMode === 'undefined' || ngDevMode ? [{ path: '__catalogo', loadComponent: () => import('./paginas/catalogo').then((m) => m.Catalogo) }] : []),
   {
     path: '',
     component: Plantilla,

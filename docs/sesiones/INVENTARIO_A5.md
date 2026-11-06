@@ -25,6 +25,10 @@ pruebas del monolito.
   sistema nuevo va solo por correo (contrato de seguridad): las e2e lo leerán de Mailpit, filtrando por el destinatario
   (`@angular.prueba.local`), como ya hace el código MFA.
 - Correos de las e2e del monolito (`@example.com`): se cambian a `@angular.prueba.local` (ADR-010).
+- Selectores (Mantine `Select`): las e2e del monolito los buscan con `getByRole('textbox', { name })`; en Angular son
+  `lume-selector` con el patrón combobox de ARIA, así que pasan a `getByRole('combobox', { name })` (solo cambia el selector). Las
+  opciones siguen siendo `getByRole('option', { name, exact: true })`. «Borrar la selección» pasa a llamarse «Borrar la selección de
+  <campo>».
 - Los casos que dependen de datos sembrados del monolito (`admin.e2e`, módulos de `logs/opciones`) se sembrarán por el contrato o por
   el control del mock.
 
