@@ -31,6 +31,9 @@ Leer junto con `docs/decisiones/` (ADR-001..014) y `librerias/comun/README.md`. 
 
 - **VISITAS A: V1–V199. VISITAS B: V200–V399.** Nadie usa números del otro rango.
 - `spring.flyway.out-of-order=true` en el servicio `visitas` (las dos ramas migran el mismo esquema en paralelo). Cada migración es independiente del orden entre rangos: si una de B necesita una tabla de A, la tabla debe estar ya en `develop`.
+- **El CI lo verifica** (`infra/ci/rangos-flyway.sh`): sin números repetidos ni fuera de V1–V399, y cada rama `visitas-a`/`visitas-b` solo agrega migraciones de su rango.
+- **Datos de catálogo en `V`, no solo en `R__`** (M3 de la revisión de BD de A): Flyway corre las repetibles al final, así que en una base nueva una V2xx de B no vería filas cargadas por `R__catalogos`. Las filas de las que pueda depender otra migración (p. ej. `par_tipos_visita`, `par_parametros`) van en una V de A; `R__catalogos` queda para actualizaciones idempotentes. Ninguna migración de B depende de datos que solo cargue una `R__`.
+- En el perfil **local**, `spring.flyway.ignore-migration-patterns: "*:missing"` permite cambiar de rama sin recrear la base; en pruebas y en cualquier otro entorno no se usa.
 - Modelo de dos roles (`visitas_ddl` para Flyway, `visitas` para la app) con `GRANT` explícito por tabla con `${rol_app}`. Las pruebas usan `infra/postgres/init/01-esquemas.sh` (ver el patrón de `servicios/seguridad`).
 
 ## Lo que ya existe y se reutiliza
