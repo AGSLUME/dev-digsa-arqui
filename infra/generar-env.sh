@@ -36,6 +36,7 @@ secreto_visitas="$(clave)"
 secreto_reportes="$(clave)"
 secreto_notificaciones="$(clave)"
 secreto_monolito="$(clave)"
+secreto_seguridad="$(clave)"
 
 contenido=$(cat <<EOF
 # Entorno local de la sesión $sesion (desfase +$d). Generado por infra/generar-env.sh. NO SE VERSIONA.
@@ -117,6 +118,8 @@ LUME_NOTIFICACIONES_SECRETO=$secreto_notificaciones
 LUME_NOTIFICACIONES_SECRETO_CODIFICADO='{noop}$secreto_notificaciones'
 LUME_MONOLITO_SECRETO=$secreto_monolito
 LUME_MONOLITO_SECRETO_CODIFICADO='{noop}$secreto_monolito'
+LUME_SEGURIDAD_SECRETO=$secreto_seguridad
+LUME_SEGURIDAD_SECRETO_CODIFICADO='{noop}$secreto_seguridad'
 LUME_USUARIO_DEV=dev.$sesion
 LUME_CLAVE_DEV=$(clave)
 LUME_PERFIL_DEV=ADMINISTRADOR
