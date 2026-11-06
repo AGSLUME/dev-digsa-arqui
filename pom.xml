@@ -44,6 +44,9 @@
         <openpdf.version>2.0.5</openpdf.version>
         <zxing.version>3.5.4</zxing.version>
         <poi.version>5.5.1</poi.version>
+        <!-- PDF de reportes (pedido de reportes, T-8): letra Liberation Sans incrustada (≤ ≥ → ° tildes) y cifrado AES-256 sin edición
+             (observación 36). Verificadas 2026-11-06: SHA-1 de Central = calculado, firma .asc, sin CVE en OSV. -->
+        <bcprov.version>1.86</bcprov.version>
         <lume.version>${project.version}</lume.version>
     </properties>
 
@@ -70,6 +73,16 @@
                 <groupId>com.github.librepdf</groupId>
                 <artifactId>openpdf</artifactId>
                 <version>${openpdf.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.librepdf</groupId>
+                <artifactId>openpdf-fonts-extra</artifactId>
+                <version>${openpdf.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcprov-jdk18on</artifactId>
+                <version>${bcprov.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.google.zxing</groupId>
