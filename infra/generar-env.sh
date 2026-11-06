@@ -126,6 +126,8 @@ LUME_PERFIL_DEV=ADMINISTRADOR
 
 # Emisor (S1): clave AES-256 que cifra las claves de firma en la tabla jwk. Vault en el cierre (I9).
 LUME_JWK_CLAVE=$(clave_aes)
+# Visitas: clave AES-256 que cifra el token del enlace del OPL guardado para el correo del acta (decisión del usuario). Vault en I9.
+VISITAS_OPL_CLAVE=$(clave_aes)
 EOF
 )
 

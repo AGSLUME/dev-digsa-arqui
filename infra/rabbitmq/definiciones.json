@@ -9,5 +9,9 @@
       "arguments": { "alternate-exchange": "reportes.sin-ruta" } },
     { "name": "notificaciones.eventos", "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false,
       "arguments": { "alternate-exchange": "notificaciones.sin-ruta" } }
+  ],
+  "policies": [
+    { "vhost": "/", "name": "sin-ruta-ttl", "pattern": "^[a-z-]+\\.sin-ruta$", "apply-to": "queues", "priority": 0,
+      "definition": { "message-ttl": 604800000 } }
   ]
 }
