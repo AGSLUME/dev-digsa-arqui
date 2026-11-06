@@ -81,7 +81,7 @@
   - Puerto `DirectorioUsuarios` sobre `usuarios_copia`: auditores activos, correos de los coordinadores y conteos por alcance y perfil.
   - `/interno/pruebas/usuarios`, solo con el perfil `local`/prueba, con una prueba de que no existe en otro perfil.
   - El consumidor `usuario.*` (idempotente y ordenado por versión) y la carga inicial y conciliación con `/interno/usuarios/exportacion` entran en cuanto el outbox y los eventos de seguridad estén en `develop`. Si no llegan antes del cierre de VA1, quedan como pendiente con fecha.
-- **VA1.6 · Interfaz Java interna para B** (`co.com.agsamericas.digsa.visitas.agenda.interno`), documentada en `servicios/visitas/README.md`:
+- **VA1.6 · Interfaz Java interna para B** (`co.com.agsamericas.digsa.visitas.agenda`), documentada en `servicios/visitas/README.md`:
   - **Implementado en VA1:** `bloquear(visitaId)` (`FOR UPDATE`, regla «primero la visita»), `porId`, `equipo`, `reparto`, `componentesDe`, `historial` y `registrarHistorial`, `cambiarEstado` y `reabrir` (UPDATE condicionado con `reglas/EstadosVisita`, `reaperturas+1`), `seguimientoDe`, la condición de alcance de visitas a partir de `UsuarioActual` y `plazos()` (parámetros y festivos, con caché corta).
   - **Firmas en VA1 e implementación en VA2:** `programarSeguimiento`, `notificarSeguimiento`, `cancelarSeguimientoPendiente`, `iniciar` y `destinatariosNotificacion`. B compila contra ellas desde VA1.
 - **Pruebas:**
@@ -89,6 +89,15 @@
   - Lo que el monolito no cubre: obligaciones, `PUT /puntos/{id}/estado` con usuarios ESM activos y `correo_digsa`.
   - Esquema y GRANT, interfaz interna (máquina de estados y bloqueo), `comun` (`Almacen` y validador) y la prueba de rutas del gateway.
 
+### Cierre de VA1 (2026-11-06): pendientes registrados
+
+- **Consumidor `usuario.*` y `cuenta.*`, con carga inicial y conciliación (`/interno/usuarios/exportacion`).** Entra en la primera unidad
+  de VA2 que se haga después de que S2-OUTBOX (outbox, `Topologia` y `ConsumoEventos` de comun) esté en `develop`. Responsable: VISITAS A.
+  Mientras tanto la copia se siembra con `/interno/pruebas/usuarios` (solo local y prueba).
+- **Eventos `punto.*`, `regional.*` y `fuerza.*` para la copia de seguridad** (ADR-002), con `contratos/eventos/visitas.yaml`. Van en VA2,
+  con el outbox. Las claves no están en la matriz de RabbitMQ: se piden a la integradora antes de publicarlas.
+- **`AgendaParaEjecucion`**: solo firmas en VA1 (paquete real `co.com.agsamericas.digsa.visitas.agenda`, no `agenda.interno` como decía
+  el plan). El bean llega en VA2.7; hasta entonces ningún bean de B debe exigirla para arrancar.
 ## VA2 · Agenda: visitas, solicitudes, propuesta, calendario y mis visitas
 
 - **VA2.0 · Contrato** 0.2.0: `/api/agenda/**`, `/api/calendario/**`, `/api/mis-visitas/**`, `/api/solicitudes/**` y `/api/propuesta/**`, con los textos de §2 del inventario.
