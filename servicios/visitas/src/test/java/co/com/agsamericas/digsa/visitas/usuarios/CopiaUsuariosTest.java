@@ -115,7 +115,13 @@ class CopiaUsuariosTest extends PruebaIntegracion {
     void unaFotoSinUidValidoSeRechaza() {
         Map<String, Object> mala = foto(1, "x", true, List.of(), null, "ninguno", null, null, null);
         mala.put("uid", "no-es-numero");
-        assertThatThrownBy(() -> copia.aplicar(sobre("usuario.creado", 1, mala))).isInstanceOf(IllegalArgumentException.class)
+        assertThatThrownBy(() -> copia.aplicar(sobre("usuario.creado", 1, mala))).isInstanceOf(co.com.agsamericas.digsa.comun.eventos.EventoInvalido.class)
                 .hasMessageNotContaining("no-es-numero");
+        Map<String, Object> sinNombre = foto(UIDS.incrementAndGet(), null, true, List.of(), null, "ninguno", null, null, null);
+        assertThatThrownBy(() -> copia.aplicar(sobre("usuario.creado", 1, sinNombre)))
+                .isInstanceOf(co.com.agsamericas.digsa.comun.eventos.EventoInvalido.class);
+        Map<String, Object> buena = foto(UIDS.incrementAndGet(), "Con versión negativa", true, List.of(), null, "ninguno", null, null, null);
+        assertThatThrownBy(() -> copia.aplicar(sobre("usuario.creado", -1, buena)))
+                .isInstanceOf(co.com.agsamericas.digsa.comun.eventos.EventoInvalido.class);
     }
 }

@@ -1,5 +1,6 @@
 package co.com.agsamericas.digsa.visitas.usuarios;
 
+import co.com.agsamericas.digsa.comun.eventos.EventoInvalido;
 import co.com.agsamericas.digsa.comun.eventos.Sobre;
 import co.com.agsamericas.digsa.reglas.Perfil;
 import java.util.ArrayList;
@@ -21,7 +22,8 @@ import tools.jackson.databind.JsonNode;
  *   <li>Solo los campos que usa visitas. El documento llega solo para los auditores (minimización de seguridad); para los demás es null.</li>
  *   <li>Sin datos personales en logs ni en excepciones.</li>
  * </ul>
- * La idempotencia por id y los reintentos los pone {@code ConsumoEventos} de comun; esto corre dentro de su transacción.
+ * La idempotencia por id y los reintentos los pone {@code ConsumoEventos} de comun; esto corre dentro de su transacción. Si seguridad reinicia
+ * sus versiones (p. ej. restaura su base), la copia se corrige con la conciliación ({@code /interno/usuarios/exportacion}), no con eventos.
  */
 @Component
 public class CopiaUsuarios {
@@ -46,8 +48,15 @@ public class CopiaUsuarios {
         }
         JsonNode d = s.datos();
         JsonNode uid = d.get("uid");
+        // Una foto mal formada nunca se arregla reintentando: EventoInvalido (sin datos del evento en el mensaje; revisión Java M1)
         if (uid == null || !uid.canConvertToLong() || uid.asLong() <= 0) {
-            throw new IllegalArgumentException("Foto de usuario sin uid válido");
+            throw new EventoInvalido("Foto de usuario sin uid válido");
+        }
+        if (texto(d, "usuario") == null || texto(d, "nombre") == null) {
+            throw new EventoInvalido("Foto de usuario sin usuario o nombre");
+        }
+        if (s.version() < 0) {
+            throw new EventoInvalido("Foto de usuario con versión negativa");
         }
         JsonNode alcance = d.path("alcance");
         int n = jdbc.sql("""
@@ -79,14 +88,26 @@ public class CopiaUsuarios {
         List<Short> r = new ArrayList<>();
         if (lista != null && lista.isArray()) {
             for (JsonNode p : lista) {
+                boolean conocido = false;
                 for (Perfil perfil : Perfil.values()) {
                     if (perfil.name().equals(p.asString())) {
                         r.add((short) perfil.id());
+                        conocido = true;
                     }
+                }
+                if (!conocido) {
+                    // El nombre del perfil no es dato personal: ayuda a ver que hace falta actualizar reglas/Perfil
+                    LOG.warn("[copia-usuarios] Perfil desconocido ignorado: {}", reglas(p.asString()));
                 }
             }
         }
         return r.toArray(Short[]::new);
+    }
+
+    /** Solo letras, dígitos y _ (y cortado): lo que llega por el evento no inyecta nada en el log. */
+    private static String reglas(String nombre) {
+        String n = nombre == null ? "" : nombre.replaceAll("[^A-Za-z0-9_]", "");
+        return n.length() > 40 ? n.substring(0, 40) : n;
     }
 
     private static String texto(JsonNode d, String campo) {
