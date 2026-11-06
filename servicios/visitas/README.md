@@ -78,6 +78,10 @@ Archivos: `Almacen` y `ValidadorArchivos` de `librerias/comun` (carpeta `lume.ar
   (`ContenedoresPrueba.ADMIN_USUARIO`), porque `visitas` no puede enlazar «#».
 - **Al integrar el comun del cierre de S2:** la cola `visitas.sin-ruta` cambia de argumentos (TTL de 7 días). En local hay que borrarla una
   vez, **solo la cola** (consola de RabbitMQ o `rabbitmqctl delete_queue visitas.sin-ruta` en el contenedor); el servicio la vuelve a crear.
+- **RabbitMQ local más liviano (develop, integradora):** `usuarios.sh` solo reaplica la matriz si faltan permisos y el healthcheck va cada
+  60 s. Después de integrar ese cambio, recrear el contenedor de la sesión una vez:
+  `docker compose -p digsa-arqui-<sesion> --env-file infra/.env -f infra/docker-compose.yml up -d --force-recreate rabbitmq`.
+  `ContenedoresPrueba` monta los mismos archivos, así que las pruebas lo heredan solas.
 - **Compilar sin `mvn install`:** `~/.m2` lo comparten todas las sesiones; instalar `lume-comun` desde una rama pisa el de las demás. Usar
   `-pl servicios/visitas -am` (el reactor resuelve comun y reglas de la propia rama).
 
