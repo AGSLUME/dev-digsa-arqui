@@ -265,7 +265,12 @@ Cada unidad sigue el mismo ciclo: qa-tdd escribe las pruebas → código → rev
 
 ## 6. Dudas
 
-### Para el usuario (negocio)
+### Para el usuario (negocio) — **decididas el 2026-11-06**
+
+- **U-1 → quitarlos.** Los 4 reportes de presupuesto desaparecen del catálogo de «Reportes». Siguen en Presupuesto > Reportes del monolito, sin código de verificación, mientras presupuesto no se migre.
+- **U-2 → se decide en el cierre (I9).** Quedan el puerto de SMS y los adaptadores «archivo» (local) y «ninguno», como en el monolito. El proveedor real se conecta en I9.
+
+Texto original de las dudas:
 
 - **U-1 · Reportes de presupuesto fuera del catálogo de «Reportes».** Hoy el Coordinador los ve en la pantalla Reportes (con código de verificación) y también en Presupuesto > Reportes (sin código). El servicio nuevo no puede pedirle filas al monolito: no se modifica y no tiene un proveedor remoto. Propongo que desaparezcan de «Reportes» y sigan en Presupuesto > Reportes, **sin código de verificación** mientras presupuesto siga en el monolito.
 - **U-2 · Proveedor real de SMS.** El monolito no tiene ninguno contratado: en producción no arranca sin él, y en local escribe archivos. Dejo el puerto y los adaptadores de archivo y «ninguno». ¿Qué proveedor se usará en producción (p. ej. un agregador con API HTTP) y cuándo? Se puede decidir en el cierre (I9); no bloquea R1.
