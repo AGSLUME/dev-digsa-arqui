@@ -1,7 +1,10 @@
 package co.com.agsamericas.digsa.gateway;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -24,6 +27,11 @@ import org.springframework.security.web.server.util.matcher.NegatedServerWebExch
 import org.springframework.security.web.server.util.matcher.PathPatternParserServerWebExchangeMatcher;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatchers;
 import org.springframework.web.server.WebFilter;
+import org.springframework.security.web.server.authentication.logout.DelegatingServerLogoutHandler;
+import org.springframework.security.web.server.authentication.logout.HttpStatusReturningServerLogoutSuccessHandler;
+import org.springframework.security.web.server.authentication.logout.SecurityContextServerLogoutHandler;
+import org.springframework.security.web.server.authentication.logout.WebSessionServerLogoutHandler;
+import tools.jackson.databind.json.JsonMapper;
 import org.springframework.web.server.session.CookieWebSessionIdResolver;
 import org.springframework.web.server.session.WebSessionIdResolver;
 import reactor.core.publisher.Mono;
@@ -39,6 +47,8 @@ import reactor.core.publisher.Mono;
 @Configuration
 @EnableWebFluxSecurity
 class ConfiguracionSeguridadGateway {
+
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(ConfiguracionSeguridadGateway.class);
 
     static final String SESION = "LUME_SESION";
     static final String INICIO_INGRESO = "/bff/oauth2/authorization/{registrationId}";
@@ -62,9 +72,11 @@ class ConfiguracionSeguridadGateway {
     static final String SIN_SESION = "La sesión expiró. Vuelva a iniciar sesión.";
     static final String SIN_PERMISO = "No tiene permiso para esta acción.";
     static final String PAGINA_EXPIRO = "La página expiró. Recárguela e intente de nuevo.";
+    static final String INACTIVIDAD = "La sesión se cerró por inactividad. Vuelva a iniciar sesión.";
+    private static final JsonMapper JSON = JsonMapper.builder().build();
 
     @Bean
-    SecurityWebFilterChain cadenaGateway(ServerHttpSecurity http, ReactiveClientRegistrationRepository registros,
+    SecurityWebFilterChain cadenaGateway(ServerHttpSecurity http, ReactiveClientRegistrationRepository registros, ClienteSeguridad seguridad,
                                          @Value("${lume.url-segura:false}") boolean urlSegura) {
         var resolutor = new DefaultServerOAuth2AuthorizationRequestResolver(registros,
                 new PathPatternParserServerWebExchangeMatcher(INICIO_INGRESO));
@@ -75,20 +87,48 @@ class ConfiguracionSeguridadGateway {
 
         http
                 .securityMatcher(new NegatedServerWebExchangeMatcher(ServerWebExchangeMatchers.pathMatchers(
-                        "/login", "/oauth2/**", "/.well-known/**", "/userinfo", "/connect/**")))
+                        "/oauth2/**", "/.well-known/**", "/userinfo", "/connect/**")))
                 .authorizeExchange(a -> a
                         .pathMatchers("/actuator/health/**", "/actuator/info").permitAll()
                         // Métricas: nunca por el puerto público (ADR-009). En el cierre se leen por el puerto interno de gestión.
                         .pathMatchers("/actuator/**").denyAll()
                         .pathMatchers("/bff/**").permitAll()
+                        // El ingreso (ADR-014): público, con el CSRF de esta cadena y el límite de tasa de su ruta
+                        .pathMatchers("/api/auth/**").permitAll()
                         .pathMatchers("/api/**").authenticated()
                         .anyExchange().permitAll())
                 .oauth2Login(o -> o
                         .authorizationRequestResolver(resolutor)
-                        .authenticationMatcher(new PathPatternParserServerWebExchangeMatcher(RETORNO_INGRESO)))
+                        // Si el canje del código falla, se registra la causa (sin el código ni tokens) y la SPA vuelve a /ingreso;
+                        // /login?error (el valor por defecto) no existe desde ADR-014.
+                        .authenticationFailureHandler((ex, err) -> {
+                            LOG.warn("[ingreso] El canje del código OIDC falló: {}", err instanceof
+                                    org.springframework.security.oauth2.core.OAuth2AuthenticationException o2
+                                    ? o2.getError().getErrorCode() + " " + o2.getError().getDescription() : err.getClass().getSimpleName());
+                            return new org.springframework.security.web.server.DefaultServerRedirectStrategy()
+                                    .sendRedirect(ex.getExchange(), java.net.URI.create("/ingreso"));
+                        })
+                        .authenticationMatcher(new PathPatternParserServerWebExchangeMatcher(RETORNO_INGRESO))
+                        // Sesión nueva → token CSRF nuevo (como el monolito tras el código, duda 17.16): el que circuló antes del ingreso
+                        // deja de servir. Luego a la SPA.
+                        .authenticationSuccessHandler((ex, a) -> csrf.generateToken(ex.getExchange())
+                                .flatMap(t -> csrf.saveToken(ex.getExchange(), t))
+                                .then(new org.springframework.security.web.server.authentication.RedirectServerAuthenticationSuccessHandler("/")
+                                        .onAuthenticationSuccess(ex, a))))
                 .formLogin(f -> f.disable())
                 .httpBasic(b -> b.disable())
-                .logout(l -> l.logoutUrl("/bff/salir"))
+                // Salir (ADR-014; bloqueante 1): cierra la sesión en seguridad (revoca el refresh token y la sesión del emisor), invalida la
+                // del gateway (con sus tokens) y responde 204, con o sin sesión. POST con CSRF.
+                .logout(l -> l
+                        .logoutUrl("/bff/salir")
+                        .logoutHandler(new DelegatingServerLogoutHandler(
+                                (ex, a) -> {
+                                    String sid = a == null ? null : FiltroSesionLume.sid(a);
+                                    return sid == null ? Mono.empty() : seguridad.cerrar(sid, "salida");
+                                },
+                                new SecurityContextServerLogoutHandler(),
+                                new WebSessionServerLogoutHandler()))
+                        .logoutSuccessHandler(new HttpStatusReturningServerLogoutSuccessHandler(HttpStatus.NO_CONTENT)))
                 .csrf(c -> c
                         .csrfTokenRepository(csrf)
                         .csrfTokenRequestHandler(new ServerCsrfTokenRequestAttributeHandler())
@@ -114,6 +154,12 @@ class ConfiguracionSeguridadGateway {
         };
     }
 
+    /** Reloj del gateway (inactividad, límite de tasa); las pruebas lo reemplazan. */
+    @Bean
+    Clock reloj() {
+        return Clock.systemUTC();
+    }
+
     @Bean
     WebSessionIdResolver resolutorSesion(@Value("${lume.url-segura:false}") boolean urlSegura) {
         CookieWebSessionIdResolver r = new CookieWebSessionIdResolver();
@@ -127,10 +173,17 @@ class ConfiguracionSeguridadGateway {
         res.getHeaders().setContentType(MediaType.APPLICATION_PROBLEM_JSON);
         HttpStatus s = HttpStatus.resolve(estado);
         String titulo = s == null ? "Page Expired" : s.getReasonPhrase();
-        String json = "{\"type\":\"urn:lume:error:" + estado + "\",\"title\":\"" + titulo + "\",\"status\":" + estado
-                + ",\"detail\":\"" + mensaje + "\",\"mensaje\":\"" + mensaje + "\""
-                + (motivo == null ? "" : ",\"motivo\":\"" + motivo + "\"") + "}";
-        DataBuffer b = res.bufferFactory().wrap(json.getBytes(StandardCharsets.UTF_8));
+        Map<String, Object> cuerpo = new LinkedHashMap<>();
+        cuerpo.put("type", "urn:lume:error:" + estado);
+        cuerpo.put("title", titulo);
+        cuerpo.put("status", estado);
+        cuerpo.put("detail", mensaje);
+        cuerpo.put("mensaje", mensaje);
+        if (motivo != null) {
+            cuerpo.put("motivo", motivo);
+        }
+        // Con Jackson: el mensaje puede venir de seguridad y se escapa como JSON
+        DataBuffer b = res.bufferFactory().wrap(JSON.writeValueAsString(cuerpo).getBytes(StandardCharsets.UTF_8));
         return res.writeWith(Mono.just(b));
     }
 }
