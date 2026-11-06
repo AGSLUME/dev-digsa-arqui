@@ -1,17 +1,19 @@
 // Mock del gateway + servicio `seguridad` para desarrollar y probar el frontend sin backend (ADR-007, ADR-014).
-// Sigue contratos/seguridad.yaml (0.4.0, con /api/usuarios/** en mock/usuarios.mjs) y el comportamiento del monolito (identidad/ y reglas/ de digsa-java). Sin dependencias: Node 24.
+// Sigue contratos/seguridad.yaml (0.5.0: /api/usuarios/** en mock/usuarios.mjs y /api/logs/** en mock/logs.mjs) y el comportamiento del monolito (identidad/ y reglas/ de digsa-java). Sin dependencias: Node 24.
 //
 //   node mock/servidor.mjs            # 127.0.0.1:9200 (el puerto del gateway de la sesión angular, ADR-010)
 //
 // Variables: DIGSA_MOCK_PUERTO, DIGSA_MOCK_MINUTOS (inactividad, 10), DIGSA_MOCK_CODIGOS_POR_HORA (5), DIGSA_MOCK_URL_PUBLICA
 // (http://localhost:4220, para los enlaces del correo), DIGSA_MOCK_TURNSTILE (clave de sitio; por omisión la de PRUEBA pública de
-// Cloudflare que siempre aprueba; «no» = captcha desactivado). Los correos (código MFA, enlaces) van al Mailpit ya instalado.
+// Cloudflare que siempre aprueba; «no» = captcha desactivado), DIGSA_MOCK_DOMINIOS_REPORTES (dominios a los que se envían los logs,
+// separados por coma; angular.prueba.local) y DIGSA_MOCK_CORREO_REPORTES (correo sugerido). Los correos van al Mailpit ya instalado.
 //
 // Solo para desarrollo y e2e: guarda todo en memoria, escucha solo en 127.0.0.1 y no tiene ningún secreto.
 import { randomBytes, randomInt } from 'node:crypto';
 import { createServer } from 'node:http';
 import { enviarCorreo } from './correo.mjs';
 import { PERFILES, permitidas, usuariosIniciales } from './datos.mjs';
+import { crearBitacora, crearRutasLogs } from './logs.mjs';
 import { bogota, crearRutasUsuarios, nombresAsignados } from './usuarios.mjs';
 
 const PUERTO = Number(process.env.DIGSA_MOCK_PUERTO ?? 9200);
@@ -46,6 +48,9 @@ function reiniciar() {
     perfiles: PERFILES.map((p) => ({ ...p })),
     roles: [],
     siguienteRol: 101,
+    /** Bitácora (Logs del sistema): eventos de negocio, en memoria. */
+    bitacora: [],
+    siguienteLog: 0,
     /** Sesión del emisor y, después del canje, también del gateway: un mismo objeto (sid). */
     sesiones: new Map(),
     /** usuarioId → id de la sesión vigente (sesión única, decisión 7.1). */
@@ -123,6 +128,12 @@ class Respuesta {
       'application/problem+json',
     );
   }
+  /** Un archivo adjunto (la descarga de los logs). */
+  archivo({ nombre, tipo, contenido }) {
+    this.res
+      .writeHead(200, { 'Cache-Control': 'no-store', 'Content-Type': tipo, 'Content-Disposition': `attachment; filename="${nombre}"`, 'Content-Length': contenido.length })
+      .end(contenido);
+  }
   redirigir(destino) {
     const cabeceras = { Location: destino, 'Cache-Control': 'no-store' };
     if (this.galletas.length) cabeceras['Set-Cookie'] = this.galletas;
@@ -145,6 +156,8 @@ async function leerCuerpo(req) {
 function sembrarCsrf(r) {
   r.galleta(cookie('XSRF-TOKEN', token(16), { httpOnly: false }));
 }
+
+const bitacora = crearBitacora(() => estado);
 
 // ---------- Sesiones ----------
 function sesionDelEmisor(req, r, crear = false) {
@@ -290,6 +303,7 @@ const rutas = {
     for (const id of [c.LUME_SESION, c.MOCK_IDP]) {
       const s = estado.sesiones.get(id);
       if (s) {
+        if (s.gateway && s.usuarioId && !s.cerrada) bitacora.registrar('logout', 'Salida', { quien: usuarioDe(s.usuarioId), modulo: 'auth' });
         cerrar(s, 'cerrada');
         estado.sesiones.delete(id);
       }
@@ -354,6 +368,7 @@ const rutas = {
       return r.problema(422, c.intentos >= 5 ? agotado : 'El código no es correcto. Revise el último correo que le enviamos.');
     }
     c.usado = true;
+    bitacora.registrar('login', `Ingreso de ${u.usuario}`, { quien: u, modulo: 'auth' });
     s.usuarioId = u.id;
     s.autenticada = true;
     s.paso = null;
@@ -518,6 +533,16 @@ const rutaUsuarios = crearRutasUsuarios({
   enviarEnlace,
   errorPolitica,
   usuarioDe,
+  bitacora,
+});
+
+const rutaLogs = crearRutasLogs({
+  estado: () => estado,
+  filtroSesion,
+  bitacora,
+  enviarCorreo,
+  enmascarar,
+  dominios: (process.env.DIGSA_MOCK_DOMINIOS_REPORTES ?? 'angular.prueba.local').split(',').map((d) => d.trim()).filter(Boolean),
 });
 
 const ESCRITURA = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -536,7 +561,7 @@ const servidor = createServer(async (req, res) => {
   if (!hostLocal(req.headers.host)) return r.problema(403, 'No tiene permiso para esta acción.');
   const camino = new URL(req.url, 'http://x').pathname;
   try {
-    const manejador = rutas[`${req.method} ${camino}`] ?? rutaUsuarios(req.method, camino);
+    const manejador = rutas[`${req.method} ${camino}`] ?? rutaUsuarios(req.method, camino) ?? rutaLogs(req.method, camino);
     if (!manejador) {
       if (camino === '/api/sesion/mantener') return r.problema(405, 'Método no permitido.');
       return r.problema(404, 'No existe.');

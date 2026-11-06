@@ -37,10 +37,15 @@ export const bogota = (ms) => new Date(ms - 5 * 3_600_000).toISOString().slice(0
 
 /**
  * @param {object} c ayudantes del servidor: `estado()` (el estado vigente), `filtroSesion`, `sesionAbierta`, `bloqueado`, `cerrar`,
- *   `enviarEnlace`, `errorPolitica`, `usuarioDe`, `ahora`.
+ *   `enviarEnlace`, `errorPolitica`, `usuarioDe` y `bitacora` (opcional: `registrar` y `registrarCambios`, mock/logs.mjs).
  */
 export function crearRutasUsuarios(c) {
   const e = () => c.estado();
+  const nada = () => undefined;
+  const log = c.bitacora ?? { registrar: nada, registrarCambios: nada };
+  /** Datos personales (Ley 1581): en la bitácora solo consta que cambiaron (ServicioUsuarios.PERSONALES). */
+  const PERSONALES = ['nombre', 'documento', 'telefono', 'correo'];
+  const foto = (u) => ({ nombre: u.nombre, documento: u.documento, telefono: u.telefono, usuario: u.usuario, correo: u.correo, perfiles: u.perfiles, fuerza: u.alcanceFuerza, punto: u.alcancePunto, regional: u.alcanceRegional });
   const perfilDe = (id) => e().perfiles.find((p) => p.id === id) ?? e().roles.find((r) => r.id === id);
   const nombresPerfiles = () => [...e().perfiles.filter((p) => p.activo), ...e().roles].map((p) => [p.id, p.nombre]);
 
@@ -134,7 +139,9 @@ export function crearRutasUsuarios(c) {
     if (!nuevo) {
       if (actual.id === quien.id && !a.efectivos.includes('Administrador')) throw new Negocio('No puede quitarse a sí mismo el perfil Administrador.');
       if (correo !== actual.correo) for (const [k, x] of e().enlaces) if (x.usuarioId === actual.id) e().enlaces.delete(k);
+      const antes = foto(actual);
       Object.assign(actual, datos);
+      log.registrarCambios('usuario_editado', `Usuario ${usuario} editado`, antes, foto(actual), PERSONALES, { quien });
       return { estado: 200, cuerpo: { id: actual.id, creado: false, correoOk: true, mensaje: 'Usuario actualizado.', enlaceLocal: null } };
     }
     const u = {
@@ -149,10 +156,13 @@ export function crearRutasUsuarios(c) {
       ultimoIngreso: null,
     };
     e().usuarios.push(u);
+    const perfilesLog = a.ids.join(', ');
     if (claveInicial !== null) {
+      log.registrar('usuario_creado', `Usuario ${usuario} creado con contraseña inicial; perfiles: ${perfilesLog}`, { quien });
       const mensaje = 'Usuario creado con contraseña inicial. Entréguela al usuario por un canal seguro: deberá cambiarla en su primer ingreso.';
       return { estado: 201, cuerpo: { id: u.id, creado: true, correoOk: true, mensaje, enlaceLocal: null } };
     }
+    log.registrar('usuario_creado', `Usuario ${usuario} creado; perfiles: ${perfilesLog}`, { quien });
     try {
       await c.enviarEnlace(u, 'Bienvenido a la Suite DIGSA', `Se creó su usuario «${usuario}» en la Suite DIGSA. Defina su contraseña con el siguiente enlace.`);
       return { estado: 201, cuerpo: { id: u.id, creado: true, correoOk: true, mensaje: 'Usuario creado. Se le envió el enlace para definir su contraseña.', enlaceLocal: null } };
@@ -238,6 +248,7 @@ export function crearRutasUsuarios(c) {
         const quiere = activo(b);
         if (id === f.u.id && !quiere) throw new Negocio('No puede inactivar su propio usuario.');
         const u = usuarioPorId(id);
+        log.registrarCambios('usuario_estado', `Usuario ${u.usuario} ${quiere ? 'activado' : 'inactivado'}`, { activo: u.activo }, { activo: quiere }, [], { quien: f.u });
         u.activo = quiere;
         if (!quiere) {
           for (const [k, x] of e().enlaces) if (x.usuarioId === id) e().enlaces.delete(k);
@@ -250,7 +261,7 @@ export function crearRutasUsuarios(c) {
     [
       'POST',
       /^\/api\/usuarios\/(\d+)\/restablecer$/,
-      async (_f, _b, id) => {
+      async (f, _b, id) => {
         const u = usuarioPorId(id);
         try {
           await c.enviarEnlace(u, 'Defina una contraseña nueva', 'El administrador de la Suite DIGSA pidió que defina una contraseña nueva.');
@@ -258,17 +269,19 @@ export function crearRutasUsuarios(c) {
           throw new Negocio('No se pudo enviar el correo: ' + x.message, { estado: 502 });
         }
         u.definir = true; // cambio obligatorio: con la clave anterior el ingreso pide definirla
+        log.registrar('usuario_restablecer', `Restablecer contraseña de ${u.usuario}`, { quien: f.u });
         return { mensaje: 'Se envió al correo del usuario el enlace para definir una contraseña nueva.' };
       },
     ],
     [
       'POST',
       /^\/api\/usuarios\/(\d+)\/clave-inicial$/,
-      (_f, b, id) => {
+      (f, b, id) => {
         const u = usuarioPorId(id);
         const p = c.errorPolitica(typeof b.clave === 'string' ? b.clave : '');
         if (p) throw new Negocio('Contraseña inicial: ' + p);
         Object.assign(u, { clave: b.clave, claveInicial: true, definir: false });
+        log.registrar('usuario_restablecer', `Contraseña inicial asignada a ${u.usuario}`, { quien: f.u });
         const s = e().sesiones.get(e().huellas.get(id));
         if (s) c.cerrar(s, 'cerrada');
         return { mensaje: 'Contraseña inicial asignada. Entréguela al usuario por un canal seguro: deberá cambiarla al ingresar.' };
@@ -277,19 +290,23 @@ export function crearRutasUsuarios(c) {
     [
       'POST',
       /^\/api\/usuarios\/(\d+)\/cerrar-sesion$/,
-      (_f, _b, id) => {
+      (f, _b, id) => {
         const u = usuarioPorId(id);
         const abierta = c.sesionAbierta(u);
-        if (abierta) c.cerrar(e().sesiones.get(e().huellas.get(id)), 'cerrada');
+        if (abierta) {
+          c.cerrar(e().sesiones.get(e().huellas.get(id)), 'cerrada');
+          log.registrar('sesion_cerrada', `Sesión de ${u.usuario} cerrada por el administrador`, { quien: f.u });
+        }
         return { mensaje: abierta ? 'Sesión cerrada.' : 'El usuario no tenía una sesión abierta.' };
       },
     ],
     [
       'POST',
       /^\/api\/usuarios\/(\d+)\/desbloquear$/,
-      (_f, _b, id) => {
+      (f, _b, id) => {
         const u = usuarioPorId(id);
         const estaba = c.bloqueado(u);
+        if (estaba) log.registrar('usuario_desbloqueado', `Usuario ${u.usuario} desbloqueado por el administrador`, { quien: f.u });
         Object.assign(u, { bloqueadoHasta: 0, intentos: 0 });
         return { mensaje: estaba ? 'Usuario desbloqueado.' : 'El usuario no estaba bloqueado.' };
       },
@@ -298,12 +315,13 @@ export function crearRutasUsuarios(c) {
     [
       'PUT',
       /^\/api\/usuarios\/seguridad$/,
-      (_f, b) => {
+      (f, b) => {
         const m = b.minutosSesion;
         if (m === null || m === undefined) throw new Negocio('Escriba los minutos de inactividad.', { campo: 'minutosSesion' });
         if (!Number.isInteger(m) || m < 1 || m > MAXIMO_MINUTOS) {
           throw new Negocio('Los minutos de inactividad deben ser un número entero de 1 a 480.', { campo: 'minutosSesion' });
         }
+        log.registrarCambios('parametro_editado', 'Tiempo de inactividad (TIME OUT)', { minutosSesion: e().minutos }, { minutosSesion: m }, [], { quien: f.u });
         e().minutos = m;
         return { mensaje: `Tiempo de inactividad actualizado: ${m} minutos. Aplica desde la siguiente acción de cada usuario.` };
       },
@@ -321,39 +339,43 @@ export function crearRutasUsuarios(c) {
     [
       'POST',
       /^\/api\/usuarios\/roles$/,
-      (_f, b) => {
+      (f, b) => {
         const base = Number.isInteger(b.baseId) ? b.baseId : null;
         const d = datosRol(b, 0, base);
         const id = e().siguienteRol++;
         e().roles.push({ id, ...d, baseId: base, activo: true });
+        log.registrar('rol_creado', `Rol ${id} «${d.nombre}» con base ${e().perfiles.find((p) => p.id === base).codigo}; pantallas: ${d.pantallas.join(', ')}`, { quien: f.u });
         return { estado: 201, cuerpo: { id, mensaje: 'Rol creado. Asígnelo en el formulario de cada usuario.' } };
       },
     ],
     [
       'PUT',
       /^\/api\/usuarios\/roles\/(\d+)$/,
-      (_f, b, id) => {
+      (f, b, id) => {
         const rol = rolPorId(id);
         if (b.baseId != null && b.baseId !== rol.baseId) {
           throw new Negocio('El perfil base de un rol no se cambia: cambiaría el alcance de sus usuarios. Cree otro rol.');
         }
+        const antes = { nombre: rol.nombre, descripcion: rol.descripcion, pantallas: rol.pantallas };
         Object.assign(rol, datosRol(b, id, rol.baseId));
+        log.registrarCambios('rol_editado', `Rol ${id}`, antes, { nombre: rol.nombre, descripcion: rol.descripcion, pantallas: rol.pantallas }, [], { quien: f.u });
         return { mensaje: 'Rol actualizado. Aplica desde la siguiente acción de sus usuarios.' };
       },
     ],
     [
       'PUT',
       /^\/api\/usuarios\/roles\/(\d+)\/estado$/,
-      (_f, b, id) => {
+      (f, b, id) => {
         const rol = rolPorId(id);
         rol.activo = activo(b);
+        log.registrar('rol_estado', `Rol ${id} ${rol.activo ? 'activado' : 'inactivado'} (${usuariosActivosCon(id)} usuarios activos lo tienen)`, { quien: f.u });
         return { mensaje: `Rol ${rol.activo ? 'activado' : 'inactivado'} (${usuariosActivosCon(id)} usuarios activos lo tienen).` };
       },
     ],
     [
       'PUT',
       /^\/api\/usuarios\/perfiles\/(\d+)$/,
-      (_f, b, id) => {
+      (f, b, id) => {
         const n = texto(b.nombre);
         const d = vacioANulo(b.descripcion);
         if (n.length < 3 || n.length > 60) throw new Negocio('El nombre del perfil debe tener de 3 a 60 caracteres.');
@@ -361,6 +383,7 @@ export function crearRutasUsuarios(c) {
         const p = e().perfiles.find((x) => x.id === id);
         if (!p) throw new Negocio('El perfil no existe.', { estado: 404 });
         if (nombresPerfiles().some(([i, x]) => i !== id && x.toLowerCase() === n.toLowerCase())) throw new Negocio('Ya existe otro perfil con ese nombre.');
+        log.registrarCambios('perfil_editado', `Perfil ${id}`, { nombre: p.nombre }, { nombre: n }, [], { quien: f.u });
         Object.assign(p, { nombre: n, descripcion: d });
         return { mensaje: 'Perfil actualizado.' };
       },

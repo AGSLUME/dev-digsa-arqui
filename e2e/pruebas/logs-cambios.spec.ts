@@ -2,14 +2,13 @@ import { expect, test } from '@playwright/test';
 import { api, DOMINIO, ingresarComoAdminPropio, reiniciarMock, salir, unico } from './apoyo';
 
 // Portado de digsa-java/e2e/pruebas/logs-cambios.spec.ts: valores de antes y después en la bitácora (Anexo 5, prueba en sitio ítem 15 b),
-// filtros por tipo y módulo. Pendiente hasta que seguridad publique /api/logs (fase S3); el caso queda escrito y marcado, sin borrarlo.
+// filtros por tipo y módulo (contrato seguridad 0.5.0; en esta sesión, contra el mock).
 // Cambios por el sistema nuevo: correos @angular.prueba.local y «Módulo» como combobox ARIA (en Mantine, textbox).
 
 test.beforeEach(() => reiniciarMock());
 test.afterEach(async ({ page }) => salir(page));
 
 test('el administrador edita un usuario y en Logs ve el antes y el después; el dato personal solo dice «modificado»', async ({ page }) => {
-  test.fixme(true, 'Pendiente de la fase S3 de seguridad: /api/logs (la pantalla Logs del sistema se porta cuando esté en el contrato)');
   await ingresarComoAdminPropio(page);
   const usuario = unico('logcam');
   const creado = await api<{ id: number }>(page, 'POST', '/api/usuarios', {
@@ -42,7 +41,8 @@ test('el administrador edita un usuario y en Logs ve el antes y el después; el 
   const tabla = page.getByTestId('tabla-logs');
   const fila = tabla.getByRole('row').filter({ hasText: `Usuario ${nuevo} editado` });
   await expect(fila).toHaveCount(1);
-  await fila.getByRole('button', { name: /^Ver los cambios del registro/ }).click();
+  // El nombre empieza por el texto visible (2.5.3): «Ver (N) cambios del registro …» (en el monolito, «Ver los cambios del registro …»)
+  await fila.getByRole('button', { name: /^Ver \(\d+\) cambios del registro/ }).click();
   const cambios = page.getByTestId('tabla-cambios');
   const filaUsuario = cambios.getByRole('row').filter({ has: page.getByRole('cell', { name: 'usuario', exact: true }) });
   const celdas = filaUsuario.getByRole('cell');

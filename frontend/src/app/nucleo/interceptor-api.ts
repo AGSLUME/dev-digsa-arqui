@@ -50,6 +50,20 @@ export function aErrorApi(e: HttpErrorResponse): ErrorApi {
   return new ErrorApi(e.status, mensaje, datos);
 }
 
+/**
+ * El cuerpo de error de una descarga (`responseType: 'blob'`) llega como Blob: se lee como JSON (el Problema, con su `mensaje` y su
+ * `motivo`), para que el 422 o el 401 de una descarga se traten como los demás. Si no es JSON, el error queda como estaba.
+ */
+export async function legible(e: HttpErrorResponse): Promise<HttpErrorResponse> {
+  if (!(e.error instanceof Blob)) return e;
+  try {
+    const error: unknown = JSON.parse(await e.error.text());
+    return new HttpErrorResponse({ error, headers: e.headers, status: e.status, statusText: e.statusText, url: e.url ?? undefined });
+  } catch {
+    return e;
+  }
+}
+
 /** Un solo GET /api/auth/inicio a la vez: varias escrituras simultáneas sin cookie CSRF lo comparten. */
 @Injectable({ providedIn: 'root' })
 export class InicioCsrf {
@@ -67,6 +81,8 @@ export const interceptorApi: HttpInterceptorFn = (req, next) => {
       tap((ev) => {
         if (ev.type === HttpEventType.Response && url !== ESTADO) marcarActividad();
       }),
+      // Primero el cuerpo de error de una descarga (Blob) se vuelve el Problema que es; luego, el manejo de siempre
+      catchError((x: unknown) => (x instanceof HttpErrorResponse ? from(legible(x)).pipe(switchMap((e) => throwError(() => e))) : throwError(() => x))),
       catchError((e: unknown) => {
         if (!(e instanceof HttpErrorResponse)) return throwError(() => e);
         if (e.status !== 0 && url !== ESTADO) marcarActividad();
@@ -89,10 +105,15 @@ export const interceptorApi: HttpInterceptorFn = (req, next) => {
   // Sin cookie CSRF todavía: GET /api/auth/inicio la deja lista y luego va la escritura. El interceptor XSRF de Angular corre antes que
   // este (ya pasó, sin cookie), así que la cabecera se pone aquí con el valor recién recibido.
   // Varias escrituras a la vez sin cookie comparten un solo GET /api/auth/inicio
+  // WebKit deja la cookie en document.cookie un instante DESPUÉS de terminar la respuesta: sin esperarla, la primera escritura sale sin
+  // la cabecera y el gateway responde 419 (pasaba en «Definir contraseña», cuya primera petición es un POST). Se espera hasta 500 ms.
+  const esperarCookie = async () => {
+    for (let i = 0; i < ESPERAS_COOKIE && xsrf.getToken() === null; i++) await new Promise((r) => setTimeout(r, 20));
+  };
   const pedirInicio = () =>
-    (inicio.enCurso ??= new Promise<void>((listo) => next(new HttpRequest('GET', INICIO)).subscribe({ complete: listo, error: () => listo() })).finally(
-      () => (inicio.enCurso = null),
-    ));
+    (inicio.enCurso ??= new Promise<void>((listo) => next(new HttpRequest('GET', INICIO)).subscribe({ complete: listo, error: () => listo() }))
+      .then(esperarCookie)
+      .finally(() => (inicio.enCurso = null)));
   return defer(() => from(pedirInicio())).pipe(
     switchMap(() => {
       const token = xsrf.getToken();
@@ -102,3 +123,5 @@ export const interceptorApi: HttpInterceptorFn = (req, next) => {
 };
 
 const CABECERA_XSRF = 'X-XSRF-TOKEN';
+/** 25 esperas de 20 ms: hasta 500 ms a que la cookie CSRF aparezca tras /api/auth/inicio. */
+const ESPERAS_COOKIE = 25;

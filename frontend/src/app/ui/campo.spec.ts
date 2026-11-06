@@ -59,12 +59,15 @@ describe('lume-campo y lumeEntrada', () => {
 });
 
 describe('lumeBoton: cargando, bloque y enlace', () => {
-  it('cargando deshabilita (sin doble envío), marca aria-busy y al terminar devuelve el disabled que tenía', async () => {
+  it('cargando no actúa (sin doble envío) ni pierde el foco: aria-disabled y aria-busy, sin disabled; al terminar vuelve como estaba', async () => {
     const { f, el } = await montar();
     const [ingresar, cancelar] = el.querySelectorAll<HTMLButtonElement>('button.lume-boton');
+    ingresar!.focus();
     f.componentInstance.cargando.set(true);
     await f.whenStable();
-    expect(ingresar!.disabled).toBe(true);
+    expect(ingresar!.disabled).toBe(false);
+    expect(document.activeElement).toBe(ingresar);
+    expect(ingresar!.getAttribute('aria-disabled')).toBe('true');
     expect(ingresar!.getAttribute('aria-busy')).toBe('true');
     expect(ingresar!.hasAttribute('data-loading')).toBe(true);
     expect(ingresar!.textContent).toBe('Ingresar'); // sigue siendo su nombre accesible
@@ -72,11 +75,31 @@ describe('lumeBoton: cargando, bloque y enlace', () => {
     expect(f.componentInstance.clics).toBe(0);
     f.componentInstance.cargando.set(false);
     await f.whenStable();
-    expect(ingresar!.disabled).toBe(false);
+    expect(ingresar!.hasAttribute('aria-disabled')).toBe(false);
     expect(ingresar!.hasAttribute('aria-busy')).toBe(false);
     expect(cancelar!.disabled).toBe(true); // ya estaba deshabilitado
     ingresar!.click();
     expect(f.componentInstance.clics).toBe(1);
+  });
+
+  it('cargando en el botón de envío: el clic (también el implícito de Enter) no vuelve a enviar el formulario', async () => {
+    @Component({
+      imports: [...FORMULARIO_LUME],
+      template: `<form (submit)="$event.preventDefault(); envios = envios + 1"><input name="x" /><button lumeBoton type="submit" [cargando]="cargando()">Guardar</button></form>`,
+    })
+    class ConEnvio {
+      cargando = signal(true);
+      envios = 0;
+    }
+    const f = TestBed.createComponent(ConEnvio);
+    await f.whenStable();
+    const boton = (f.nativeElement as HTMLElement).querySelector('button')!;
+    boton.click();
+    expect(f.componentInstance.envios).toBe(0);
+    f.componentInstance.cargando.set(false);
+    await f.whenStable();
+    boton.click();
+    expect(f.componentInstance.envios).toBe(1);
   });
 
   it('sobre un enlace conserva el elemento y su href; bloque ocupa el ancho', async () => {

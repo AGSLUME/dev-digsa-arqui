@@ -44,22 +44,34 @@ export class Boton {
   /** Ocupa todo el ancho (`fullWidth` del monolito). */
   readonly bloque = input(false, { transform: booleanAttribute });
   /**
-   * Petición en curso (`loading` del monolito): como en Mantine, el botón queda deshabilitado (no hay doble envío, tampoco con Enter),
-   * con `aria-busy` y un indicador en lugar del texto, que sigue siendo su nombre accesible. Al terminar vuelve el `disabled` que tenía.
+   * Petición en curso (`loading` del monolito): el botón no actúa (no hay doble envío, tampoco con Enter: el envío implícito del formulario
+   * es un clic en su botón y se cancela), con `aria-busy`, `aria-disabled` y un indicador en lugar del texto, que sigue siendo su nombre
+   * accesible. No usa `disabled` a propósito: un botón deshabilitado pierde el foco y quien usa el teclado o el lector queda en el body
+   * (2.4.3). Al terminar vuelve el `aria-disabled` que tenía.
    */
   readonly cargando = input(false, { transform: booleanAttribute });
 
   constructor() {
-    let previo: boolean | null = null;
+    // En la fase de captura, antes que los (click) de la pantalla (que se registran en burbuja)
+    this.el.addEventListener(
+      'click',
+      (e) => {
+        if (!this.cargando()) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      },
+      { capture: true },
+    );
+    let previo: string | null | undefined;
     effect(() => {
       const cargando = this.cargando();
-      if (!(this.el instanceof HTMLButtonElement)) return;
-      if (cargando && previo === null) {
-        previo = this.el.disabled;
-        this.el.disabled = true;
-      } else if (!cargando && previo !== null) {
-        this.el.disabled = previo;
-        previo = null;
+      if (cargando && previo === undefined) {
+        previo = this.el.getAttribute('aria-disabled');
+        this.el.setAttribute('aria-disabled', 'true');
+      } else if (!cargando && previo !== undefined) {
+        if (previo === null) this.el.removeAttribute('aria-disabled');
+        else this.el.setAttribute('aria-disabled', previo);
+        previo = undefined;
       }
     });
   }

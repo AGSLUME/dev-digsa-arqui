@@ -4,7 +4,7 @@ import { ADMIN, DOMINIO, enlaceDelCorreo, ingresar, reiniciarMock, salir, sinDes
 // Portado de digsa-java/e2e/pruebas/usuarios-y-logs.spec.ts: Anexo 5, prueba 2 (usuarios por la interfaz, contraseñas cifradas) y
 // prueba 15 (logs en el navegador, con descarga y correo). También el caso del teléfono de alertas.spec.ts:91, que es del formulario de
 // Usuarios. Cambios por el sistema nuevo: el enlace para definir la contraseña se lee del correo (Mailpit) y no del aviso, y los correos
-// son @angular.prueba.local. Los casos de Logs quedan pendientes hasta que seguridad publique /api/logs (fase S3), sin borrarlos.
+// son @angular.prueba.local (también el destino del reporte de logs, que solo se envía a ese dominio en el mock).
 
 test.beforeEach(() => reiniciarMock());
 test.afterEach(async ({ page }) => salir(page));
@@ -67,7 +67,6 @@ test('un teléfono que no es móvil colombiano muestra el error del servidor (al
 });
 
 test('logs: se ven en pantalla con usuario, fecha, operación y detalle; se descargan en Excel y se envían por correo', async ({ page }) => {
-  test.fixme(true, 'Pendiente de la fase S3 de seguridad: /api/logs (la pantalla Logs del sistema se porta cuando esté en el contrato)');
   await ingresar(page, ...ADMIN);
   await page.getByRole('link', { name: 'Logs del sistema' }).click();
   await page.getByRole('button', { name: 'Buscar' }).click();
@@ -90,9 +89,11 @@ for (const [nombre, ancho] of [
   ['escritorio', 1280],
 ] as const) {
   test(`responsivo ${nombre} (${ancho} px): sin desplazamiento horizontal en ingreso, inicio y logs`, async ({ page }) => {
-    test.fixme(true, 'Pendiente de la fase S3 de seguridad: la pantalla Logs del sistema (/api/logs)');
     await page.setViewportSize({ width: ancho, height: 800 });
+    // Sin sesión, «/» navega (página completa) al ingreso del emisor: se mide ya en el ingreso
     await page.goto('/');
+    await page.waitForURL(/\/ingreso$/);
+    await expect(page.getByRole('button', { name: 'Ingresar', exact: true })).toBeVisible();
     await sinDesplazamientoHorizontal(page);
     await ingresar(page, ...ADMIN);
     await sinDesplazamientoHorizontal(page);
@@ -101,7 +102,7 @@ for (const [nombre, ancho] of [
     await sinDesplazamientoHorizontal(page);
   });
 
-  // Lo mismo con Usuarios (criterio de A5: funciona a 360 px), mientras Logs está pendiente: la tabla, el formulario y Roles adicionales
+  // Lo mismo con Usuarios (criterio de A5: funciona a 360 px): la tabla, el formulario y Roles adicionales
   test(`responsivo ${nombre} (${ancho} px): sin desplazamiento horizontal en Usuarios, su formulario y Roles adicionales`, async ({ page }) => {
     await page.setViewportSize({ width: ancho, height: 800 });
     await ingresar(page, ...ADMIN);

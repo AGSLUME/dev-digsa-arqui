@@ -13,8 +13,9 @@ import { pantalla } from './nucleo/guardas';
  * que una más general si comparten prefijo.
  */
 export const RUTAS_DE_MODULOS: Routes = [
-  // --- seguridad (A5: usuarios y roles adicionales; logs llega con /api/logs, fase S3 de seguridad) ---
+  // --- seguridad (A5: usuarios, roles adicionales y logs) ---
   { path: 'usuarios', canMatch: [pantalla('usuarios')], loadComponent: () => import('./paginas/seguridad/usuarios').then((m) => m.Usuarios) },
+  { path: 'logs', canMatch: [pantalla('logs')], loadComponent: () => import('./paginas/seguridad/logs').then((m) => m.Logs) },
   // --- visitas ---
   // --- reportes ---
 ];

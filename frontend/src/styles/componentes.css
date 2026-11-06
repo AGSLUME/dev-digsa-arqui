@@ -1087,3 +1087,34 @@ form:not([novalidate]) .lume-entrada:user-invalid {
     min-width: 640px;
   }
 }
+/* Filtros de Logs (SimpleGrid cols base 1, sm 2, md 4) */
+.lume-rejilla-4 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+@media (min-width: 36em) {
+  .lume-rejilla-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 62em) {
+  .lume-rejilla-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@media (min-width: 48em) {
+  .lume-tabla--min-860 {
+    min-width: 860px;
+  }
+  .lume-tabla--min-480 {
+    min-width: 480px;
+  }
+}
+.lume-sin-cortes {
+  white-space: nowrap;
+}
+/* Textos largos sin espacios (detalle, valores de antes y después): se parten para no desbordar */
+.lume-partir {
+  overflow-wrap: anywhere;
+}
