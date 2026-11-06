@@ -109,7 +109,7 @@
   - comun/ConfiguracionRecurso: `/interno/**` solo con token de máquina (sin `uid`).
   - visitas: la pantalla se revisa por ruta antes de leer el cuerpo (403 y no 400); `V10__ajuste_permisos.sql` quita los GRANT sin uso.
   - Descargas (VA2 y B): Content-Type de una lista cerrada, `nosniff` y `Content-Disposition: attachment` con nombre generado.- **VA2.0 · Contrato** 0.2.0: `/api/agenda/**`, `/api/calendario/**`, `/api/mis-visitas/**`, `/api/solicitudes/**` y `/api/propuesta/**`, con los textos de §2 del inventario.
-- **VA2.1 · Esquema** (V10–V19): `V11__solicitudes.sql` (de V11) y `V12__propuesta.sql` (de V15); V10 la usa VA2.S, con el trigger de solo borrador.
+- **VA2.1 · Esquema** (V10–V19): `V12__solicitudes.sql` (de V11) y `V13__propuesta.sql` (de V15); V10 la usa VA2.S y V11 el outbox (VA2.O), con el trigger de solo borrador.
 - **VA2.2 · Visitas:**
   - Operaciones: programar, editar, reprogramar, cancelar, reasignar, mover reparto y detalle.
   - Listados: agenda (≤2000 filas, con alertas de plazo) y `/seguimiento`.
