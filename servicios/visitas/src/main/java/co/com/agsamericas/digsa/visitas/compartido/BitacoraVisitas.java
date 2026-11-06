@@ -5,23 +5,23 @@ import co.com.agsamericas.digsa.comun.auditoria.PublicadorAuditoria;
 import co.com.agsamericas.digsa.comun.seguridad.UsuarioActual;
 import co.com.agsamericas.digsa.reglas.Bitacora;
 import java.time.Clock;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
 /**
  * Eventos de negocio de la bitácora (Anexo 5, prueba 15) con los tipos de {@link Bitacora#TIPOS} y los textos de {@code RegistroBitacora}
  * del monolito. Se publican por {@link PublicadorAuditoria} de lume-comun (hoy el log; con S3, el outbox hacia {@code seguridad}). La fila por
- * petición (el {@code @Accion} del monolito) la pone el filtro de comun en S3, no esta clase (integradora, 2026-11-06).
+ * petición (el {@code @Accion} del monolito) la pone el filtro de comun en S3, no esta clase.
  *
- * <p>Como en el monolito, nunca lanza: una bitácora caída no deshace el cambio. El detalle va sin correos ({@link Bitacora#sinCorreos})
- * y quien llama nunca pone documentos ni datos de contacto (Ley 1581).
+ * <p>Decisión M5 (integradora, ADR-006): el evento va en la <b>misma transacción</b> del cambio y, si no se puede publicar, la operación
+ * falla (se audita lo que sí ocurrió). Por eso aquí no se atrapa ningún error. Los eventos de fracaso o denegación, cuya transacción se
+ * revierte, irán por {@code publicarIndependiente} cuando exista en comun; hoy este servicio no publica ninguno.
+ *
+ * <p>El detalle va sin correos ({@link Bitacora#sinCorreos}) y quien llama nunca pone documentos ni datos de contacto (Ley 1581).
  */
 @Component
 public class BitacoraVisitas {
 
-    private static final Logger LOG = LoggerFactory.getLogger(BitacoraVisitas.class);
     private static final String SERVICIO = "visitas";
 
     private final PublicadorAuditoria publicador;
@@ -39,13 +39,7 @@ public class BitacoraVisitas {
     }
 
     public void registrar(String tipo, String detalle, Long uid, String usuario) {
-        try {
-            Bitacora.Operacion operacion = Bitacora.operacionDeTipo(tipo);
-            publicador.publicar(new EventoAuditoria(reloj.instant(), SERVICIO, uid, usuario, operacion, tipo,
-                    detalle == null ? null : Bitacora.sinCorreos(Bitacora.cortar(detalle, Bitacora.MAX_DETALLE)), null,
-                    MDC.get("traceId")));
-        } catch (RuntimeException e) {
-            LOG.error("[bitacora] No se pudo publicar {}", tipo, e);
-        }
+        publicador.publicar(new EventoAuditoria(reloj.instant(), SERVICIO, uid, usuario, Bitacora.operacionDeTipo(tipo), tipo,
+                detalle == null ? null : Bitacora.sinCorreos(Bitacora.cortar(detalle, Bitacora.MAX_DETALLE)), null, MDC.get("traceId")));
     }
 }
