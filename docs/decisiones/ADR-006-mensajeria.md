@@ -19,7 +19,7 @@ Hay flujos asíncronos entre servicios: auditoría (todos → `seguridad`), corr
 
     | Exchange | Lee | Claves |
     |---|---|---|
-    | `seguridad.eventos` | gateway | `sesion.*`, `usuario.permisos_cambiados`, `usuario.estado_cambiado` |
+    | `seguridad.eventos` | gateway | `sesion.*` (`sesion.cerrada`, `sesion.refrescar {uid, motivo, version}`; nunca la foto del usuario) |
     | `seguridad.eventos` | visitas, reportes | `usuario.*`, `cuenta.*` |
     | `visitas.eventos` | reportes | `visita.*`, `hallazgo.*` |
     | `visitas.eventos` | notificaciones | `alerta.*`, `aviso.*` |

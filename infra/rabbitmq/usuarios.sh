@@ -56,7 +56,8 @@ for u in $SERVICIOS; do
 done
 
 # 2) Matriz de lectura (lo que cada consumidor necesita; una clave nueva se pide a la integradora).
-tema gateway seguridad.eventos "$NADA" '^(sesion\..*|usuario\.(permisos_cambiados|estado_cambiado))$'
+# el gateway solo ve sesion.* (sesion.cerrada, sesion.refrescar): nunca la foto del usuario con documento ni correo (Ley 1581)
+tema gateway seguridad.eventos "$NADA" '^sesion\..*$'
 tema visitas seguridad.eventos "$NADA" '^(usuario|cuenta)\..*$'
 tema reportes seguridad.eventos "$NADA" '^(usuario|cuenta)\..*$'
 tema reportes visitas.eventos "$NADA" '^(visita|hallazgo)\..*$'
