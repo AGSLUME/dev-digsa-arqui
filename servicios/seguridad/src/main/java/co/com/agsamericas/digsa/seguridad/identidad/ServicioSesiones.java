@@ -22,11 +22,13 @@ public class ServicioSesiones {
     private final RepositorioSesiones sesiones;
     private final JdbcClient jdbc;
     private final Clock reloj;
+    private final EventosUsuario eventos;
 
-    public ServicioSesiones(RepositorioSesiones sesiones, JdbcClient jdbc, Clock reloj) {
+    public ServicioSesiones(RepositorioSesiones sesiones, JdbcClient jdbc, Clock reloj, EventosUsuario eventos) {
         this.sesiones = sesiones;
         this.jdbc = jdbc;
         this.reloj = reloj;
+        this.eventos = eventos;
     }
 
     /**
@@ -39,23 +41,32 @@ public class ServicioSesiones {
     public Optional<UUID> abrir(long usuarioId, int minutos, String ip) {
         Instant ahora = reloj.instant();
         sesiones.bloquearUsuario(usuarioId);
-        sesiones.cerrarInactivas(usuarioId, ahora, minutos).forEach(this::revocar);
+        for (UUID sid : sesiones.cerrarInactivas(usuarioId, ahora, minutos)) {
+            revocar(sid);
+            eventos.sesionCerrada(sid, usuarioId, Motivo.INACTIVIDAD);
+        }
         return sesiones.insertar(usuarioId, ahora, ip);
     }
 
-    /** Cierra una sesión y revoca lo que dependa de ella. @return true si estaba abierta */
+    /** Cierra una sesión y revoca lo que dependa de ella; si la cerró, publica {@code sesion.cerrada}. @return true si estaba abierta */
     @Transactional
     public boolean cerrar(UUID sid, Motivo motivo) {
         boolean cerrada = sesiones.cerrar(sid, motivo, reloj.instant());
         revocar(sid);
+        if (cerrada) {
+            sesiones.porId(sid).ifPresent(s -> eventos.sesionCerrada(sid, s.usuarioId(), motivo));
+        }
         return cerrada;
     }
 
-    /** Cierra la sesión abierta del usuario, si la hay. @return true si había una */
+    /** Cierra la sesión abierta del usuario, si la hay, con su {@code sesion.cerrada}. @return true si había una */
     @Transactional
     public boolean cerrarDeUsuario(long usuarioId, Motivo motivo) {
         List<UUID> cerradas = sesiones.cerrarDeUsuario(usuarioId, motivo, reloj.instant());
-        cerradas.forEach(this::revocar);
+        for (UUID sid : cerradas) {
+            revocar(sid);
+            eventos.sesionCerrada(sid, usuarioId, motivo);
+        }
         return !cerradas.isEmpty();
     }
 

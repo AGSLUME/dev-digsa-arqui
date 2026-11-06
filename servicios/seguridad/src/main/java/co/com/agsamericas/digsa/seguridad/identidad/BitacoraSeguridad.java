@@ -4,6 +4,8 @@ import co.com.agsamericas.digsa.comun.auditoria.EventoAuditoria;
 import co.com.agsamericas.digsa.comun.auditoria.PublicadorAuditoria;
 import co.com.agsamericas.digsa.reglas.Bitacora;
 import java.time.Clock;
+import java.util.Map;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -40,5 +42,22 @@ public class BitacoraSeguridad {
         } catch (RuntimeException e) {
             LOG.error("[bitacora] No se pudo publicar {}", tipo, e);
         }
+    }
+
+    /**
+     * Como {@code registrarCambios} del monolito (ítem 15 b): el detalle lleva lo que cambió, «campo: «antes» → «después»»; los campos de
+     * {@code sinValor} (datos personales, Ley 1581) solo como «modificado». La lista estructurada de cambios llega con el evento de S3.
+     */
+    public void escribirCambios(Bitacora.Operacion operacion, String tipo, String descripcion, Map<String, ?> antes, Map<String, ?> despues,
+                                Set<String> sinValor, Long uid, String usuario) {
+        String cambios;
+        try {
+            cambios = Bitacora.cambios(antes, despues, sinValor);
+        } catch (RuntimeException e) {
+            LOG.error("[bitacora] No se pudieron calcular los cambios de {}", tipo, e);
+            cambios = "";
+        }
+        escribir(operacion, tipo, Bitacora.cortar(descripcion + (cambios.isEmpty() ? " (sin cambios)" : ": " + cambios), Bitacora.MAX_DETALLE),
+                uid, usuario, null);
     }
 }

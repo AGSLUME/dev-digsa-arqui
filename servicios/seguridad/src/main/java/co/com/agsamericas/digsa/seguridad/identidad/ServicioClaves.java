@@ -47,13 +47,15 @@ public class ServicioClaves {
     private final PropiedadesSeguridad cfg;
     private final TransactionTemplate tx;
     private final Clock reloj;
+    private final EventosUsuario eventos;
     /** «Olvidé mi contraseña» fuera de la petición; cola acotada: una avalancha de solicitudes no agota la memoria ni el SMTP. */
     private final ThreadPoolExecutor hilosOlvido = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS, new ArrayBlockingQueue<>(100),
             Thread.ofPlatform().name("lume-olvido").daemon(true).factory());
 
     public ServicioClaves(RepositorioUsuarios usuarios, RepositorioSesiones sesiones, ServicioSesiones cierres, CorreoSeguridad correo,
                           PasswordEncoder codificador, BitacoraSeguridad bitacora, PropiedadesSeguridad cfg, TransactionTemplate tx,
-                          Clock reloj) {
+                          Clock reloj, EventosUsuario eventos) {
+        this.eventos = eventos;
         this.usuarios = usuarios;
         this.sesiones = sesiones;
         this.cierres = cierres;
@@ -194,7 +196,14 @@ public class ServicioClaves {
             cerrarPorBloqueo(u, "Sesión cerrada: el usuario está bloqueado por intentos fallidos", ip);
         }
         if (!coincide(actual, u.claveHash())) {
-            if (usuarios.registrarFallo(u.id(), ahora, ServicioIngreso.INTENTOS_MAXIMOS, ServicioIngreso.MINUTOS_BLOQUEO)) {
+            // El bloqueo y su cuenta.bloqueada, en una sola transacción (outbox)
+            if (Boolean.TRUE.equals(tx.execute(t -> {
+                boolean bloqueo = usuarios.registrarFallo(u.id(), ahora, ServicioIngreso.INTENTOS_MAXIMOS, ServicioIngreso.MINUTOS_BLOQUEO);
+                if (bloqueo) {
+                    eventos.publicar("cuenta.bloqueada", u.id());
+                }
+                return bloqueo;
+            }))) {
                 bitacora.escribir(Bitacora.Operacion.INGRESO, "cuenta_bloqueada", "Usuario bloqueado " + ServicioIngreso.MINUTOS_BLOQUEO
                         + " minutos por " + ServicioIngreso.INTENTOS_MAXIMOS + " intentos fallidos", u.id(), u.usuario(), ip);
                 cerrarPorBloqueo(u, "Sesión cerrada: " + ServicioIngreso.INTENTOS_MAXIMOS + " contraseñas actuales erradas al cambiarla", ip);

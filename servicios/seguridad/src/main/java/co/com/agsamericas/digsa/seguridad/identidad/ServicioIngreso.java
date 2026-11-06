@@ -92,13 +92,16 @@ public class ServicioIngreso {
     private final ParametrosSeguridad parametros;
     private final JdbcClient jdbc;
     private final Clock reloj;
+    private final EventosUsuario eventos;
     /** Hash de relleno: el tiempo de respuesta no revela si el usuario existe. */
     private final String hashRelleno;
 
     public ServicioIngreso(RepositorioUsuarios usuarios, RepositorioSesiones sesiones, ServicioSesiones cierres, TransactionTemplate tx,
                            ServicioClaves claves, Captcha captcha,
                            CorreoSeguridad correo, PasswordEncoder codificador, BitacoraSeguridad bitacora, SecurityContextRepository contextos,
-                           RequestCache peticiones, PropiedadesSeguridad cfg, ParametrosSeguridad parametros, JdbcClient jdbc, Clock reloj) {
+                           RequestCache peticiones, PropiedadesSeguridad cfg, ParametrosSeguridad parametros, JdbcClient jdbc, Clock reloj,
+                           EventosUsuario eventos) {
+        this.eventos = eventos;
         this.usuarios = usuarios;
         this.sesiones = sesiones;
         this.cierres = cierres;
@@ -148,7 +151,16 @@ public class ServicioIngreso {
                 coincide(clave, hashRelleno);
                 motivo = "Intento con el usuario bloqueado";
             } else if (!coincide(clave, encontrado.get().claveHash())) {
-                if (usuarios.bloquearSiAlcanzo(encontrado.get().id(), intento.get(), ahora, INTENTOS_MAXIMOS, MINUTOS_BLOQUEO)) {
+                long uid = encontrado.get().id();
+                int n = intento.get();
+                // El bloqueo y su evento cuenta.bloqueada, en una sola transacción (outbox)
+                if (Boolean.TRUE.equals(tx.execute(t -> {
+                    boolean bloqueo = usuarios.bloquearSiAlcanzo(uid, n, ahora, INTENTOS_MAXIMOS, MINUTOS_BLOQUEO);
+                    if (bloqueo) {
+                        eventos.publicar("cuenta.bloqueada", uid);
+                    }
+                    return bloqueo;
+                }))) {
                     bitacora.escribir(Bitacora.Operacion.INGRESO, "cuenta_bloqueada", "Usuario bloqueado " + MINUTOS_BLOQUEO
                             + " minutos por " + INTENTOS_MAXIMOS + " intentos fallidos", encontrado.get().id(), encontrado.get().usuario(), ip);
                 }
