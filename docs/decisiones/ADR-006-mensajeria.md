@@ -23,7 +23,9 @@ Hay flujos asíncronos entre servicios: auditoría (todos → `seguridad`), corr
     | `seguridad.eventos` | visitas, reportes | `usuario.*`, `cuenta.*` |
     | `visitas.eventos` | reportes | `visita.*`, `hallazgo.*` |
     | `visitas.eventos` | notificaciones | `alerta.*`, `aviso.*` |
-    | `visitas`/`reportes`/`notificaciones.eventos` | seguridad | `auditoria.*` |
+    | `visitas.eventos` | seguridad | `auditoria.*`, `punto.*`, `regional.*`, `fuerza.*` (copia de maestros) |
+    | `reportes`/`notificaciones.eventos` | seguridad | `auditoria.*` |
+    | `notificaciones.eventos` | visitas | `envio.*` (resultado del envío con su referencia, p. ej. `acta:{id}`; D-N1) |
 
   - Convención de claves: lo que debe notificarse a una persona sale como `aviso.<tipo>` (p. ej. `aviso.solicitud_nueva`) y lo crítico como `alerta.<tipo>`; la auditoría como `auditoria.<tipo>`. Una clave o un consumidor nuevo se pide a la integradora, que amplía la matriz.
   - Tope de mensaje 256 KiB (`max_message_size`). TLS de AMQP en el cierre (I9).

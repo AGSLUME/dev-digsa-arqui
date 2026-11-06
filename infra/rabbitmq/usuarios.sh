@@ -61,10 +61,14 @@ tema visitas seguridad.eventos "$NADA" '^(usuario|cuenta)\..*$'
 tema reportes seguridad.eventos "$NADA" '^(usuario|cuenta)\..*$'
 tema reportes visitas.eventos "$NADA" '^(visita|hallazgo)\..*$'
 tema notificaciones visitas.eventos "$NADA" '^(alerta|aviso)\..*$'
+# visitas recibe el resultado de los envíos que pidió (acta: la visita se cierra al generarla y el correo sale después; D-N1)
+tema visitas notificaciones.eventos "$NADA" '^envio\..*$'
 # seguridad consume la auditoría de todos (ADR-002/006); en su propio exchange conserva la escritura
-for p in visitas reportes notificaciones; do
+for p in reportes notificaciones; do
   tema seguridad "${p}.eventos" "$NADA" '^auditoria\..*$'
 done
+# en visitas.eventos, además, los maestros de su copia local de puntos, regionales y fuerzas (ADR-002; pedido de visitas-a en VA1)
+tema seguridad visitas.eventos "$NADA" '^(auditoria|punto|regional|fuerza)\..*$'
 
 touch /var/lib/rabbitmq/.usuarios-lume-listos
 echo "usuarios.sh: usuarios de servicio y matriz de lectura listos"
