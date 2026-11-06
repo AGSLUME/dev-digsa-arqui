@@ -32,6 +32,24 @@ pruebas del monolito.
 - Los casos que dependen de datos sembrados del monolito (`admin.e2e`, módulos de `logs/opciones`) se sembrarán por el contrato o por
   el control del mock.
 
+### Diferencias de la implementación de A5 (Usuarios y Roles adicionales)
+
+- **Botones de fila**: Mantine usa `variant="light"` con colores (gris, verde, naranja, uva, rojo); LUME no tiene botones de color
+  suave, así que van como `secundario` pequeño y «Cerrar sesión» como `peligro`. Textos, `aria-label` y condiciones son los del
+  monolito.
+- **«Editar»** lleva `aria-label="Editar a <nombre>"` (y en Roles, `Editar el rol <nombre>`, igual que el monolito): en el monolito el
+  de Usuarios no tenía, y todos los «Editar» de la tabla se llamaban igual (WCAG 2.4.6). `getByRole('button', { name: 'Editar' })` sigue
+  encontrándolo (coincidencia parcial).
+- **Insignias de estado**: «Contraseña inicial» (`grape` en Mantine) va en la variante info, como todo color fuera de la paleta LUME;
+  «Activo», «Bloqueado» e «Inactivo» son rellenas y «Sesión abierta» y «Contraseña inicial» con borde, como el `Badge` del monolito.
+- **«Buscar»** filtra también sin tildes (el monolito solo pasaba a minúsculas): «jose» encuentra a «José».
+- **E2E**: `roles.spec` comprueba el 403 con `GET /api/usuarios` en lugar de `/api/agenda/opciones` (el servicio de visitas aún no
+  existe en esta sesión; la regla de autorización por pantalla es la misma). El bloqueo por 5 intentos manda una respuesta de captcha
+  (el monolito local no tenía captcha). Los casos de Logs (`usuarios-y-logs` y `logs-cambios`) quedan escritos y marcados con
+  `test.fixme` hasta que seguridad publique `/api/logs` (fase S3).
+- **Mock** (`frontend/mock/usuarios.mjs`): reglas y textos de `ServicioUsuarios`, `ServicioRoles`, `Roles`, `Alcance` y
+  `Alertas.normalizarTelefono`; los establecimientos y regionales son ficticios y fijos, y no hay bitácora.
+
 ---
 
 # Inventario literal: Usuarios, Roles adicionales y Logs (monolito digsa-java)

@@ -60,6 +60,11 @@ describe('tema LUME: contraste WCAG 2.2 AA', () => {
     expect(contraste(LUME.blueActive, LUME.bg)).toBeGreaterThanOrEqual(3);
   });
 
+  it.each(Object.entries(VARIANTES))('insignia %s rellena (blanco sobre el color) y con borde (el color sobre blanco)', (_n, v) => {
+    expect(contraste(LUME.white, v.punto)).toBeGreaterThanOrEqual(4.5);
+    expect(contraste(v.punto, LUME.white)).toBeGreaterThanOrEqual(4.5);
+  });
+
   it.each(Object.entries(VARIANTES))('insignia y alerta %s: texto, y los enlaces (--lume-blue) dentro de la alerta, sobre su fondo', (_n, v) => {
     expect(contraste(v.texto, v.fondo)).toBeGreaterThanOrEqual(4.5);
     expect(contraste(LUME.text, v.fondo)).toBeGreaterThanOrEqual(4.5);

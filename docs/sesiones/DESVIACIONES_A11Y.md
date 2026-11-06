@@ -34,6 +34,12 @@ ni los textos ni los `data-testid`:
 | C4 | Pasos del ingreso | `paginas/publicas/ingreso.ts` | Al pasar al código, el foco cae en el body | El foco va a la primera casilla (o al primer campo del cambio de clave) |
 | C5 | Título de la pestaña en las públicas | ingreso, claves, sin conexión | «Suite DIGSA» | «Suite DIGSA · Ingreso», «· Recuperar contraseña», «· Definir contraseña», «· Sin conexión» (2.4.2) |
 | C6 | Avisos de éxito | `ui/avisos.ts`, `styles/shell.css` | La región aparece con el texto | La región existe siempre y el aviso de «Mi contraseña» sale después de cerrar el modal (4.1.3) |
+| C7 | Texto visible de dos botones de fila de Usuarios (A5; **único cambio visible**) | `paginas/seguridad/usuarios.html` | «Restablecer contraseña» y «Cerrar sesión», con nombre «Restablecer la contraseña de X» y «Cerrar la sesión de X»: el texto visible no está dentro del nombre (falla 2.5.3, nivel A; el control por voz no los encuentra) | «Restablecer la contraseña» y «Cerrar la sesión»; los `aria-label` (y las e2e que los usan) no cambian |
+| C8 | Acciones de fila mientras corre una | `usuarios.html`, `modales-usuarios.ts` (Nombres de perfiles) | `disabled` en el botón pulsado: el foco cae al body; «Desbloquear» y «Cerrar sesión» desaparecen con el foco encima | `aria-disabled` (se ve y se anuncia igual, Playwright lo ve deshabilitado) y la acción no corre; si el botón se va, el foco pasa al primer botón de la fila (2.4.3). Cada «Guardar» de Nombres de perfiles dice de qué perfil es («Guardar el nombre de Auditor», 2.4.6) |
+| C9 | Formulario en línea y tabla de Roles adicionales | `paginas/seguridad/roles-adicionales.ts` | Al abrir «Nuevo rol» o «Editar» el foco se queda en el botón (el formulario sale debajo); al cerrar se pierde. La tabla va en un `ScrollArea` | Foco al primer campo al abrir y de vuelta al botón que lo abrió al cerrar (2.4.3). La tabla es `TablaAdaptable` (tarjetas en celular; parada de Tab solo si desborda) |
+
+Mejoras de A5 que quedan sin aplicar (bajas): el error del teléfono que sale al salir del campo no se anuncia (el lector lo oye al volver
+al campo y en el resumen al guardar, 3.3.1 se cumple); las insignias de una celda no van en lista.
 
 Quedan como el monolito (mejoras sin bloqueo): grupos del menú lateral sin `role="group"`, «Acceso restringido.» sin h1, ícono de «Menú»
 que no cambia a «×», ayudas emergentes no «hoverables» (repiten el nombre accesible; Escape las cierra en cualquier momento).

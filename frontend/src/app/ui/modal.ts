@@ -76,7 +76,7 @@ export class Modal {
   /** La «×» de la cabecera (`withCloseButton` del monolito). */
   readonly conCerrar = input(true, { transform: booleanAttribute });
   readonly centrado = input(false, { transform: booleanAttribute });
-  readonly ancho = input<'sm' | 'md' | 'lg'>('md');
+  readonly ancho = input<'sm' | 'md' | 'lg' | 'xl'>('md');
   /** Escape, clic en el fondo, la «×» o el diálogo cerrado por el CDK: la pantalla decide (y pone `abierto` en false). */
   readonly cerrar = output<void>();
 

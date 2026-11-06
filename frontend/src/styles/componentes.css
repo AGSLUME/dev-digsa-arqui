@@ -175,13 +175,13 @@ svg[aria-hidden='true'] {
   color: var(--lume-blue);
 }
 /* Deshabilitado (también el de BotonConMotivo, aria-disabled): primario #93C5FD con texto blanco; el resto, apagado */
-.lume-boton:is(:disabled, [data-disabled]) {
+.lume-boton:is(:disabled, [data-disabled], [aria-disabled='true']) {
   cursor: not-allowed;
   background: var(--lume-bg);
   color: var(--lume-neutral-text);
   border-color: var(--lume-border);
 }
-.lume-boton--primario:is(:disabled, [data-disabled]) {
+.lume-boton--primario:is(:disabled, [data-disabled], [aria-disabled='true']) {
   background: var(--complemento-primario-deshabilitado);
   color: var(--lume-white);
   border-color: transparent;
@@ -568,6 +568,9 @@ form:not([novalidate]) .lume-entrada:user-invalid {
 }
 .lume-modal[data-ancho='lg'] {
   width: 720px;
+}
+.lume-modal[data-ancho='xl'] {
+  width: 900px;
 }
 .lume-modal__cabecera {
   display: flex;
@@ -1009,4 +1012,78 @@ form:not([novalidate]) .lume-entrada:user-invalid {
   place-items: center;
   min-width: 24px;
   color: var(--lume-neutral-text);
+}
+
+/* ---------- Insignia rellena y con borde (Badge filled y outline del monolito) ---------- */
+/* Relleno: el texto de la variante como fondo y blanco encima (≥ 4,5:1 en las cinco: tema.spec.ts) */
+.lume-insignia--relleno {
+  background: var(--insignia-punto);
+  color: var(--lume-white);
+}
+.lume-insignia--relleno::before {
+  background: var(--lume-white);
+}
+/* Borde: fondo blanco, borde y texto del color de la variante */
+.lume-insignia--borde {
+  background: var(--lume-white);
+  color: var(--insignia-punto);
+  box-shadow: inset 0 0 0 1px var(--insignia-punto);
+}
+.lume-insignia--borde::before {
+  display: none;
+}
+
+/* ---------- Utilidades de las pantallas (Group, SimpleGrid y ScrollArea del monolito) ---------- */
+.lume-fila--fin {
+  justify-content: flex-end;
+}
+.lume-fila--abajo {
+  align-items: flex-end;
+}
+.lume-crece {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.lume-negrita {
+  font-weight: 600;
+}
+/* Dos columnas desde 48em (SimpleGrid cols base 1, sm 2) */
+.lume-rejilla-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+@media (min-width: 48em) {
+  .lume-rejilla-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+/* Insignias de una celda (Group gap=4): se acomodan en varias líneas */
+.lume-insignias {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+/* Botones de una fila de tabla (Group gap=4 wrap=nowrap) en escritorio; en celular la tarjeta los acomoda */
+.lume-acciones-fila {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+@media (min-width: 48em) {
+  .lume-acciones-fila {
+    flex-wrap: nowrap;
+  }
+}
+.lume-buscar {
+  max-width: 420px;
+}
+/* Ancho mínimo de la tabla (miw del monolito) solo en escritorio: en celular la tabla adaptable es una tarjeta por fila */
+@media (min-width: 48em) {
+  .lume-tabla--min-760 {
+    min-width: 760px;
+  }
+  .lume-tabla--min-640 {
+    min-width: 640px;
+  }
 }

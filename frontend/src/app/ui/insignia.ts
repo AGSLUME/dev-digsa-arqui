@@ -20,11 +20,18 @@ import { variante } from './tema';
 })
 export class Insignia {
   readonly color = input<string | undefined>(undefined);
+  /**
+   * `suave` (por omisión; el `variant="light"` del monolito: fondo suave con punto), `relleno` (el `Badge` por omisión de Mantine: fondo
+   * del color de la variante con texto blanco) o `borde` (`variant="outline"`: borde y texto del color, fondo blanco). Siempre con los
+   * colores de la variante LUME (un color fuera de la paleta, como el `grape` del monolito, es «info»).
+   */
+  readonly estilo = input<'suave' | 'relleno' | 'borde'>('suave');
   /** Ocupa su línea (`display: flex`), como `Badge` con `display="block"`. */
   readonly bloque = input(false, { transform: booleanAttribute });
-  protected readonly clases = computed(
-    () => `lume-insignia lume-insignia--${variante(this.color())}${this.bloque() ? ' lume-insignia--bloque' : ''}`,
-  );
+  protected readonly clases = computed(() => {
+    const e = this.estilo();
+    return `lume-insignia lume-insignia--${variante(this.color())}${e === 'suave' ? '' : ' lume-insignia--' + e}${this.bloque() ? ' lume-insignia--bloque' : ''}`;
+  });
 }
 
 /**
