@@ -17,10 +17,18 @@ import org.springframework.stereotype.Service;
  * consulta el gateway en cada petición (caché ≤30 s) y también {@code /api/sesion*} del propio servicio. Orden del monolito: usuario
  * inactivo → contraseña cambiada después del inicio → sesión cerrada (salida, administrador, otro ingreso, bloqueo) → contraseña
  * vencida → cambio exigido (envía el enlace). La inactividad la mide el gateway (tiene la hora exacta de cada petición) con los minutos
- * que se le devuelven, y cierra con {@link Motivo#INACTIVIDAD}; aquí solo se usa la actividad informada para la decisión 7.1.
+ * que se le devuelven, y cierra con {@link Motivo#INACTIVIDAD}; aquí se usa la actividad informada para la decisión 7.1 y como segunda
+ * barrera, con {@link #MARGEN_INFORME} de holgura.
  */
 @Service
 public class ServicioEstadoSesion {
+
+    /**
+     * Holgura sobre la actividad informada: el gateway la informa como máximo cada 30 s ({@code FiltroSesionLume.INFORMAR_CADA_MS}) y
+     * marca el informe antes de enviarlo, así que uno perdido la atrasa hasta 60 s. {@code MargenInactividadTest} exige que sea al menos el
+     * doble de ese intervalo.
+     */
+    static final Duration MARGEN_INFORME = Duration.ofSeconds(60);
 
     /** Textos del 401 por motivo (los del monolito; {@code sin_sesion} es el del punto de entrada de Spring Security). */
     public static final Map<String, String> MENSAJES = Map.of(
@@ -101,6 +109,15 @@ public class ServicioEstadoSesion {
             return Estado.cerrada(minutos, s.usuarioId(), motivoDeCierre(s.motivo()), null);
         }
         Instant ahora = reloj.instant();
+        // Segunda barrera (el monolito medía aquí): sin actividad informada en el plazo más el intervalo de informe del gateway, se cierra
+        // aunque el gateway no lo haya hecho (llamada directa, caché del gateway o gateway caído). El margen evita cerrar a quien sigue
+        // activo pero cuya actividad aún no se informó.
+        if (s.ultimo() != null && Duration.between(s.ultimo(), ahora).compareTo(Duration.ofMinutes(minutos).plus(MARGEN_INFORME)) > 0) {
+            if (cierres.cerrar(s.id(), Motivo.INACTIVIDAD)) {
+                bitacora.escribir(Bitacora.Operacion.SALIDA, "sesion_expirada", "Sesión cerrada por inactividad", usuario.id(), usuario.usuario(), null);
+            }
+            return Estado.cerrada(minutos, s.usuarioId(), "inactividad", null);
+        }
         if (usuario.claveActualizada() != null && usuario.claveActualizada().isAfter(s.inicio())) {
             cerrarSiAbierta(s, Motivo.CLAVE);
             return Estado.cerrada(minutos, s.usuarioId(), "clave", null);

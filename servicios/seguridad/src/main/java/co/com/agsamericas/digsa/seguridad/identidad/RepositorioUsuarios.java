@@ -168,6 +168,132 @@ public class RepositorioUsuarios {
         jdbc.sql("UPDATE usuarios SET token_hash = NULL, token_vence = NULL WHERE id = :id").param("id", id).update();
     }
 
+    // ---------- Administración (S2; portado de RepositorioUsuarios del monolito) ----------
+
+    public List<Usuario> todos() {
+        return jdbc.sql("SELECT " + COLUMNAS + " FROM usuarios u ORDER BY u.nombre, u.id").query(RepositorioUsuarios::fila).list();
+    }
+
+    public boolean existeUsuario(String usuario, long excepto) {
+        return jdbc.sql("SELECT count(*) FROM usuarios WHERE usuario = :u AND id <> :id").param("u", usuario).param("id", excepto)
+                .query(Long.class).single() > 0;
+    }
+
+    public boolean existeCorreo(String correo, long excepto) {
+        return jdbc.sql("SELECT count(*) FROM usuarios WHERE correo = :c AND id <> :id").param("c", correo).param("id", excepto)
+                .query(Long.class).single() > 0;
+    }
+
+    public long crear(String nombre, String documento, String telefono, String usuario, String correo, String claveHash, String fuerza,
+                      Long punto, Long regional, Instant ahora) {
+        return jdbc.sql("""
+                INSERT INTO usuarios (nombre, documento, telefono, usuario, correo, clave_hash, alcance_fuerza, alcance_punto,
+                                      alcance_regional, creado, actualizado)
+                VALUES (:nombre, :documento, :telefono, :usuario, :correo, :clave, :fuerza, :punto, :regional, :ahora, :ahora)
+                RETURNING id""")
+                .param("nombre", nombre).param("documento", documento).param("telefono", telefono).param("usuario", usuario)
+                .param("correo", correo).param("clave", claveHash).param("fuerza", fuerza).param("punto", punto)
+                .param("regional", regional).param("ahora", odt(ahora)).query(Long.class).single();
+    }
+
+    public void actualizar(long id, String nombre, String documento, String telefono, String usuario, String correo, String fuerza,
+                           Long punto, Long regional, Instant ahora) {
+        jdbc.sql("""
+                UPDATE usuarios SET nombre = :nombre, documento = :documento, telefono = :telefono, usuario = :usuario, correo = :correo,
+                  alcance_fuerza = :fuerza, alcance_punto = :punto, alcance_regional = :regional, actualizado = :ahora
+                WHERE id = :id""")
+                .param("nombre", nombre).param("documento", documento).param("telefono", telefono).param("usuario", usuario)
+                .param("correo", correo).param("fuerza", fuerza).param("punto", punto).param("regional", regional)
+                .param("ahora", odt(ahora)).param("id", id).update();
+    }
+
+    /**
+     * Asignaciones del usuario (perfiles base y roles adicionales, por id): reemplaza las activas. Las de roles inactivos se conservan: si el
+     * rol se reactiva, el usuario lo vuelve a tener.
+     */
+    public void reemplazarAsignados(long id, java.util.Collection<Integer> perfilIds) {
+        jdbc.sql("DELETE FROM usuarios_perfiles WHERE usuario_id = :id AND perfil_id IN (SELECT id FROM perfiles WHERE activo)")
+                .param("id", id).update();
+        for (Integer p : perfilIds) {
+            jdbc.sql("INSERT INTO usuarios_perfiles (usuario_id, perfil_id) VALUES (:u, :p) ON CONFLICT DO NOTHING").param("u", id)
+                    .param("p", p).update();
+        }
+    }
+
+    /** Bloquea la fila del usuario hasta el fin de la transacción (ediciones simultáneas). */
+    public void bloquear(long id) {
+        jdbc.sql("SELECT id FROM usuarios WHERE id = :id FOR UPDATE").param("id", id).query(Long.class).optional();
+    }
+
+    public void cambiarEstado(long id, boolean activo, Instant ahora) {
+        jdbc.sql("UPDATE usuarios SET activo = :a, actualizado = :ahora WHERE id = :id").param("a", activo).param("ahora", odt(ahora))
+                .param("id", id).update();
+    }
+
+    /** Quita el bloqueo vigente; si no estaba bloqueado no toca los intentos. @return si lo desbloqueó */
+    public boolean desbloquear(long id, Instant ahora) {
+        return jdbc.sql("UPDATE usuarios SET intentos = 0, bloqueado_hasta = NULL, actualizado = :ahora WHERE id = :id AND bloqueado_hasta > :ahora")
+                .param("ahora", odt(ahora)).param("id", id).update() == 1;
+    }
+
+    /** Contraseña inicial asignada por el administrador: vale 72 horas para ingresar y obliga a cambiarla en la aplicación. */
+    public void asignarClaveInicial(long id, String claveHash, Instant ahora) {
+        jdbc.sql("""
+                UPDATE usuarios SET clave_hash = :c, clave_definida = true, clave_inicial = true, debe_cambiar_clave = true, clave_vence = :vence,
+                  clave_actualizada = :ahora, token_hash = NULL, token_vence = NULL, intentos = 0, bloqueado_hasta = NULL, actualizado = :ahora
+                WHERE id = :id""").param("c", claveHash).param("vence", odt(ahora.plusSeconds(3600L * HORAS_CLAVE_INICIAL)))
+                .param("ahora", odt(ahora)).param("id", id).update();
+    }
+
+    /** Bloquea, en orden de id, a los usuarios activos con el perfil Administrador (guarda del último administrador). */
+    public void bloquearAdministradoresActivos() {
+        jdbc.sql("""
+                SELECT u.id FROM usuarios u JOIN usuarios_perfiles up ON up.usuario_id = u.id
+                WHERE up.perfil_id = :adm AND u.activo ORDER BY u.id FOR UPDATE OF u""")
+                .param("adm", co.com.agsamericas.digsa.reglas.Perfil.ADMINISTRADOR.id()).query(Long.class).list();
+    }
+
+    /** Usuarios activos con el perfil Administrador, sin contar a {@code excepto}. */
+    public long contarAdministradoresActivos(long excepto) {
+        return jdbc.sql("""
+                SELECT count(*) FROM usuarios u JOIN usuarios_perfiles up ON up.usuario_id = u.id
+                WHERE up.perfil_id = :adm AND u.activo AND u.id <> :excepto""")
+                .param("adm", co.com.agsamericas.digsa.reglas.Perfil.ADMINISTRADOR.id()).param("excepto", excepto).query(Long.class).single();
+    }
+
+    /** El nombre del perfil, con su fila bloqueada hasta el fin de la transacción. */
+    public Optional<String> nombrePerfilBloqueado(int id) {
+        return jdbc.sql("SELECT nombre FROM perfiles WHERE id = :id FOR NO KEY UPDATE").param("id", id).query(String.class).optional();
+    }
+
+    public void renombrarPerfil(int id, String nombre, String descripcion) {
+        jdbc.sql("UPDATE perfiles SET nombre = :n, descripcion = :d WHERE id = :id").param("n", nombre).param("d", descripcion).param("id", id)
+                .update();
+    }
+
+    /** Perfiles y roles adicionales activos que se pueden asignar (Consulta queda fuera); los roles traen su perfil base. */
+    public List<Map<String, Object>> perfilesActivos() {
+        return jdbc.sql("SELECT id, nombre, descripcion, base_id AS \"baseId\" FROM perfiles WHERE activo ORDER BY base_id NULLS FIRST, id")
+                .query().listOfRows();
+    }
+
+    /** Perfiles y roles activos, con la base de cada rol adicional (nula en los perfiles base). */
+    public Map<Integer, Integer> activosConBase() {
+        Map<Integer, Integer> m = new HashMap<>();
+        jdbc.sql("SELECT id, base_id FROM perfiles WHERE activo").query((rs, n) -> m.put(rs.getInt(1), (Integer) rs.getObject(2))).list();
+        return m;
+    }
+
+    /** Roles adicionales activos, con su base y pantallas, por id. */
+    public Map<Integer, Roles.Adicional> rolesActivos() {
+        Map<Integer, Roles.Adicional> m = new HashMap<>();
+        roles(jdbc.sql("""
+                SELECT COALESCE(string_agg(p.id || ':' || p.base_id || ':' || COALESCE(pp.pantalla, ''), ','), '')
+                FROM perfiles p JOIN perfiles b ON b.id = p.base_id AND b.activo LEFT JOIN perfiles_pantallas pp ON pp.perfil_id = p.id
+                WHERE p.activo""").query(String.class).single()).forEach(r -> m.put(r.id(), r));
+        return m;
+    }
+
     /** Nombres visibles de perfiles y roles (configurables por el administrador). */
     public Map<Integer, String> nombresPerfiles() {
         Map<Integer, String> m = new HashMap<>();

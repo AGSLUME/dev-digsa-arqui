@@ -53,6 +53,12 @@ public class RepositorioSesiones {
                 .param("u", usuarioId).param("limite", odt(ahora.minusSeconds(60L * minutos))).query(Long.class).single() > 0;
     }
 
+    /** Usuarios con una sesión que bloquea un ingreso nuevo (para el listado de administración, en una sola consulta). */
+    public java.util.Set<Long> conSesionQueBloquea(Instant ahora, int minutos) {
+        return new java.util.HashSet<>(jdbc.sql("SELECT usuario_id FROM sesiones WHERE cerrada IS NULL AND ultimo > :limite")
+                .param("limite", odt(ahora.minusSeconds(60L * minutos))).query(Long.class).list());
+    }
+
     /**
      * Bloquea la fila del usuario hasta el fin de la transacción (la apertura de su sesión se serializa). Lo usa
      * {@link ServicioSesiones#abrir}, que abre la transacción.

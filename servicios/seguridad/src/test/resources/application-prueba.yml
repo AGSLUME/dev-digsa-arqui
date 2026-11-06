@@ -5,6 +5,9 @@ LUME_JWK_CLAVE: "cHJ1ZWJhLXNvbG8tcHJ1ZWJhLXNvbG8tcHJ1ZWJhLTE="
 LUME_URL_SEGURA: "false"
 
 lume:
+  eventos:
+    # Las pruebas llaman a DespachadorOutbox.despachar() a mano: el ciclo automático queda apagado
+    cada-ms: 0
   contrasenas:
     permitir-noop: true
   captcha:
