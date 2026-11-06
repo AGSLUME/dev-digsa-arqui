@@ -62,7 +62,7 @@ public class ConfiguracionRecurso {
                 .authorizeHttpRequests(a -> a
                         .requestMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
                         .requestMatchers("/api/**").access(ConfiguracionRecurso::tokenDeUsuario)
-                        .requestMatchers("/interno/**").authenticated()
+                        .requestMatchers("/interno/**").access(ConfiguracionRecurso::tokenDeMaquina)
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(o -> o
                         .jwt(j -> j.jwtAuthenticationConverter(convertidor))
@@ -76,6 +76,15 @@ public class ConfiguracionRecurso {
         return http.build();
     }
 
+    /**
+     * Solo un JWT de máquina ({@code client_credentials}, sin {@code uid}): un token de persona no llega a {@code /interno/**} aunque traiga el
+     * alcance (revisión de seguridad de la integradora sobre visitas-a VA1, BAJA 7). Cada endpoint pide además su {@code SCOPE_*}.
+     */
+    static AuthorizationDecision tokenDeMaquina(Supplier<? extends Authentication> autenticacion, RequestAuthorizationContext contexto) {
+        Authentication a = autenticacion.get();
+        return new AuthorizationDecision(a instanceof JwtAuthenticationToken t && a.isAuthenticated()
+                && t.getToken().getClaim(ClaimsLume.UID) == null);
+    }
     /** Solo un JWT de persona (con {@code uid}); un token de máquina no llega a las API de usuario. */
     static AuthorizationDecision tokenDeUsuario(Supplier<? extends Authentication> autenticacion, RequestAuthorizationContext contexto) {
         Authentication a = autenticacion.get();

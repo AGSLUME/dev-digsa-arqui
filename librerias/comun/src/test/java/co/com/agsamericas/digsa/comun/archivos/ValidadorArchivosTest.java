@@ -281,4 +281,192 @@ class ValidadorArchivosTest {
         assertThat(ValidadorArchivos.estructuraOffice(b.toByteArray(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
                 .isFalse();
     }
+
+    // ---------------------------------------------------------------- revisión de seguridad de la integradora sobre VA1
+
+    /** ZIP con las entradas dadas; {@code relleno} bytes pseudoaleatorios (incompresibles) en la primera, para forzar el tamaño. */
+    private static byte[] zipConRelleno(int relleno, String... entradas) throws IOException {
+        ByteArrayOutputStream b = new ByteArrayOutputStream(relleno + 4096);
+        byte[] azar = new byte[relleno];
+        new Random(7).nextBytes(azar);
+        try (java.util.zip.ZipOutputStream z = new java.util.zip.ZipOutputStream(b)) {
+            boolean primera = true;
+            for (String e : entradas) {
+                z.putNextEntry(new java.util.zip.ZipEntry(e));
+                z.write(primera ? azar : "<x/>".getBytes(StandardCharsets.UTF_8));
+                primera = false;
+                z.closeEntry();
+            }
+        }
+        return b.toByteArray();
+    }
+
+    /**
+     * SUPUESTO: la cabecera mínima de un MP4 (caja {@code ftyp} con marca {@code mp42}) basta para que Tika (solo por magia) diga
+     * {@code video/mp4}; el resto son ceros hasta el tamaño pedido.
+     */
+    private static byte[] mp4(int tamano) {
+        byte[] ftyp = {0, 0, 0, 0x18, 'f', 't', 'y', 'p', 'm', 'p', '4', '2', 0, 0, 0, 0, 'm', 'p', '4', '2', 'i', 's', 'o', 'm'};
+        return Arrays.copyOf(ftyp, tamano);
+    }
+
+    @Test
+    void unZipConEstructuraDeDocxDeMasDe25MbSeRechazaCon413SinAnalizarloComoOffice() throws IOException {
+        byte[] grande = zipConRelleno((int) ValidadorArchivos.MAX_ARCHIVO + 1024 * 1024, "[Content_Types].xml", "word/document.xml");
+        assertThat(grande.length).isGreaterThan((int) ValidadorArchivos.MAX_ARCHIVO);
+
+        // El tamaño se mide antes de analizar: debe ser 413 (con el análisis primero sería un recorrido costoso del ZIP)
+        assertThatThrownBy(() -> validador.validar("informe.docx", grande))
+                .isInstanceOfSatisfying(ErrorNegocio.class, e -> {
+                    assertThat(e.estado()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
+                    assertThat(e.getMessage()).isEqualTo("El archivo «informe.docx» pesa más de 25 MB.");
+                });
+    }
+
+    @Test
+    void unArchivoDeTipoInadmitidoMuyGrandeTambienEs413() {
+        byte[] exe = new byte[(int) ValidadorArchivos.MAX_ARCHIVO + 1];
+        exe[0] = 'M';
+        exe[1] = 'Z';
+
+        assertThatThrownBy(() -> validador.validar("programa.exe", exe))
+                .isInstanceOfSatisfying(ErrorNegocio.class, e -> assertThat(e.estado()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE));
+    }
+
+    @Test
+    void unVideoDe30MbPasaElTopeDeArchivoPeroUnoDeMasDe100MbNo() {
+        byte[] treinta = mp4(30 * 1024 * 1024);
+        ValidadorArchivos.Valido v = validador.validar("clip.mp4", treinta);
+        assertThat(v.tipo()).isEqualTo("video/mp4");
+        assertThat(v.extension()).isEqualTo("mp4");
+
+        byte[] enorme = mp4((int) ValidadorArchivos.MAX_VIDEO + 1);
+        assertThatThrownBy(() -> validador.validar("clip.mp4", enorme))
+                .isInstanceOfSatisfying(ErrorNegocio.class, e -> {
+                    assertThat(e.estado()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
+                    assertThat(e.getMessage()).isEqualTo("El archivo «clip.mp4» pesa más de 100 MB.");
+                });
+    }
+
+    @Test
+    void elTopeDescomprimidoEs100Mb() {
+        assertThat(ValidadorArchivos.MAX_DESCOMPRIMIDO).isEqualTo(100L * 1024 * 1024);
+    }
+
+    @Test
+    void unOle2GenericoYaNoSeAcepta() {
+        byte[] ole = new byte[512];
+        byte[] cabecera = {(byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0, (byte) 0xA1, (byte) 0xB1, 0x1A, (byte) 0xE1};
+        System.arraycopy(cabecera, 0, ole, 0, cabecera.length);
+
+        assertThat(ValidadorArchivos.TIPOS).doesNotContainKey("application/x-tika-msoffice");
+        assertThatThrownBy(() -> validador.validar("x.bin", ole))
+                .isInstanceOfSatisfying(ErrorNegocio.class, e -> {
+                    assertThat(e.estado()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+                    assertThat(e.getMessage()).isEqualTo(NO_ADMITIDO.formatted("x.bin"));
+                });
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"word/vbaProject.bin", "word/activeX/activeX1.xml", "word/activeX/activeX1.bin"})
+    void unDocxConMacrosOControlesActivosSeRechaza(String peligrosa) throws IOException {
+        byte[] docx = zip("[Content_Types].xml", "_rels/.rels", "word/document.xml", peligrosa);
+
+        assertThatThrownBy(() -> validador.validar("informe.docx", docx))
+                .isInstanceOfSatisfying(ErrorNegocio.class, e -> {
+                    assertThat(e.estado()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+                    assertThat(e.getMessage()).isEqualTo(NO_ADMITIDO.formatted("informe.docx"));
+                });
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"xl/vbaProject.bin", "xl/embeddings/oleObject1.bin", "xl/activeX/activeX1.xml"})
+    void unXlsxConMacrosOIncrustadosSeRechaza(String peligrosa) throws IOException {
+        byte[] xlsx = zip("[Content_Types].xml", "_rels/.rels", "xl/workbook.xml", peligrosa);
+
+        assertThatThrownBy(() -> validador.validar("datos.xlsx", xlsx))
+                .isInstanceOfSatisfying(ErrorNegocio.class, e -> assertThat(e.estado()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY));
+    }
+
+    @Test
+    void unDocxYUnXlsxNormalesSiguenPasando() throws IOException {
+        assertThat(validador.validar("informe.docx", zip("[Content_Types].xml", "_rels/.rels", "word/document.xml", "word/styles.xml")).extension())
+                .isEqualTo("docx");
+        assertThat(validador.validar("datos.xlsx", zip("[Content_Types].xml", "_rels/.rels", "xl/workbook.xml", "xl/worksheets/sheet1.xml")).extension())
+                .isEqualTo("xlsx");
+    }
+
+    /**
+     * SUPUESTO DEL CÓDIGO: el enderezado lee solo el segmento EXIF (JpegMetadataReader + ExifReader) y nunca el XMP, cuyo XML podría
+     * traer entidades externas (XXE). La prueba mete un XMP con una entidad SYSTEM a /etc/passwd y comprueba que no se resuelve.
+     */
+    @Test
+    void unXmpConEntidadExternaNoSeResuelveNiCuelga() throws IOException {
+        String xml = "<?xpacket begin=\"﻿\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n"
+                + "<!DOCTYPE x [<!ENTITY e SYSTEM \"file:///etc/passwd\">]>\n"
+                + "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">"
+                + "<rdf:Description xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>&e;</dc:title></rdf:Description>"
+                + "</rdf:RDF></x:xmpmeta>\n<?xpacket end=\"w\"?>";
+        byte[] cabecera = "http://ns.adobe.com/xap/1.0/\0".getBytes(StandardCharsets.ISO_8859_1);
+        byte[] cuerpoXml = xml.getBytes(StandardCharsets.UTF_8);
+        int longitud = 2 + cabecera.length + cuerpoXml.length;
+        byte[] app1 = new byte[2 + longitud];
+        app1[0] = (byte) 0xFF;
+        app1[1] = (byte) 0xE1;
+        app1[2] = (byte) (longitud >> 8);
+        app1[3] = (byte) longitud;
+        System.arraycopy(cabecera, 0, app1, 4, cabecera.length);
+        System.arraycopy(cuerpoXml, 0, app1, 4 + cabecera.length, cuerpoXml.length);
+
+        byte[] base = imagen("jpg", 40, 20);
+        byte[] conXmp = new byte[base.length + app1.length];
+        System.arraycopy(base, 0, conXmp, 0, 2);
+        System.arraycopy(app1, 0, conXmp, 2, app1.length);
+        System.arraycopy(base, 2, conXmp, 2 + app1.length, base.length - 2);
+        byte[] jpeg = conOrientacionExif(conXmp, 6); // EXIF primero, XMP después
+
+        ValidadorArchivos.Valido[] resultado = new ValidadorArchivos.Valido[1];
+        org.junit.jupiter.api.Assertions.assertTimeout(java.time.Duration.ofSeconds(2), () -> resultado[0] = validador.validar("foto.jpg", jpeg));
+
+        assertThat(resultado[0].tipo()).isEqualTo("image/jpeg");
+        assertThat(new String(resultado[0].contenido(), StandardCharsets.ISO_8859_1)).doesNotContain("root:");
+        assertThat(ValidadorArchivos.dimensiones(resultado[0].contenido())).as("sigue enderezando con el XMP presente").containsExactly(20, 40);
+    }
+
+    private static String nombreMostrado(String mensaje) {
+        int a = mensaje.indexOf('«');
+        int b = mensaje.lastIndexOf('»');
+        assertThat(a).isGreaterThanOrEqualTo(0);
+        assertThat(b).isGreaterThan(a);
+        return mensaje.substring(a + 1, b);
+    }
+
+    private static void sinControlesNiBidi(String texto) {
+        assertThat(texto.chars().filter(c -> Character.isISOControl(c) || c == 0x202E)).isEmpty();
+    }
+
+    @Test
+    void elNombreSeSaneaEnLosMensajesDeError() {
+        String nombre = "a\u0000b\u001Fc‮" + "x".repeat(300);
+        byte[] exe = {'M', 'Z', 0, 0};
+        byte[] grande = Arrays.copyOf(pdfMinimo(), (int) ValidadorArchivos.MAX_ARCHIVO + 1);
+
+        for (Runnable caso : new Runnable[] {
+                () -> validador.validar(nombre, new byte[0]),
+                () -> validador.validar(nombre, exe),
+                () -> validador.validar(nombre, grande)}) {
+            assertThatThrownBy(caso::run).isInstanceOfSatisfying(ErrorNegocio.class, e -> {
+                sinControlesNiBidi(e.getMessage());
+                String mostrado = nombreMostrado(e.getMessage());
+                assertThat(mostrado.length()).isLessThanOrEqualTo(100);
+                assertThat(mostrado).startsWith("a").endsWith("…");
+            });
+        }
+    }
+
+    @Test
+    void unNombreCortoYNormalNoSeAltera() {
+        assertThatThrownBy(() -> validador.validar("informe final.pdf", new byte[0]))
+                .isInstanceOfSatisfying(ErrorNegocio.class, e -> assertThat(e.getMessage()).isEqualTo("El archivo «informe final.pdf» está vacío."));
+    }
 }

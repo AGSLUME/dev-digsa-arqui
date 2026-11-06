@@ -8,7 +8,7 @@ Al depender de `lume-comun`, todo servicio queda como **servidor de recursos** (
 
 - La cadena se aplica **siempre** y va **de última**.
 - `/api/**` exige un token de persona (claim `uid`).
-- `/interno/**` exige un token válido. Cada endpoint pide su alcance con `@PreAuthorize("hasAuthority('SCOPE_<servicio>:<operación>')")`.
+- `/interno/**` exige un token de máquina (sin claim `uid`): un token de persona no entra aunque traiga el alcance. Cada endpoint pide su alcance con `@PreAuthorize("hasAuthority('SCOPE_<servicio>:<operación>')")`.
 - Lo no declarado queda cerrado.
 - Si un servicio necesita reglas propias (por ejemplo, rutas públicas), declara otra cadena con `securityMatcher(...)` y un `@Order` menor.
 

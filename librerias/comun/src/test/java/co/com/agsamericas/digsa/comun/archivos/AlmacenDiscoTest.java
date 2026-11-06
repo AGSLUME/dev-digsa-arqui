@@ -187,4 +187,74 @@ class AlmacenDiscoTest {
         assertThatCode(() -> enMemoria.verificar("m/1.txt", Huellas.sha256(datos))).doesNotThrowAnyException();
         assertThatThrownBy(() -> enMemoria.verificar("m/1.txt", Huellas.sha256("distinto"))).isInstanceOf(ArchivoAlterado.class);
     }
+
+    // ---------------------------------------------------------------- revisión de seguridad de la integradora sobre VA1
+
+    @Test
+    void guardarNoSobrescribeYDejaIntactoElOriginalSinTemporales() throws IOException {
+        almacen.guardar("a/x.txt", "uno".getBytes(StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> almacen.guardar("a/x.txt", "dos".getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOf(FileAlreadyExistsException.class);
+
+        assertThat(Files.readString(raiz.resolve("a/x.txt"))).isEqualTo("uno");
+        try (var lista = Files.list(raiz.resolve("a"))) {
+            assertThat(lista.map(p -> p.getFileName().toString())).containsExactly("x.txt");
+        }
+    }
+
+    @Test
+    void despuesDeGuardarNoQuedaNingunTemporalEnLaCarpeta() throws IOException {
+        almacen.guardar("t/a.pdf", new byte[] {1, 2, 3});
+        almacen.guardar("t/b.pdf", new byte[] {4});
+
+        try (var lista = Files.list(raiz.resolve("t"))) {
+            assertThat(lista.map(p -> p.getFileName().toString())).containsExactlyInAnyOrder("a.pdf", "b.pdf");
+        }
+    }
+
+    @Test
+    void elArchivoGuardadoEsSoloDelDuenoEnPosix() throws IOException {
+        org.junit.jupiter.api.Assumptions.assumeTrue(java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
+
+        almacen.guardar("p/a.pdf", new byte[] {1});
+
+        assertThat(java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(raiz.resolve("p/a.pdf"))))
+                .isEqualTo("rw-------");
+    }
+
+    @Test
+    void unEnlaceDeCarpetaQueApuntaFueraDeLaRaizSeRechaza() throws IOException {
+        Path fuera = Files.createTempDirectory("fuera-del-almacen");
+        try {
+            Files.writeString(fuera.resolve("secreto.txt"), "no debe leerse");
+            try {
+                Files.createSymbolicLink(raiz.resolve("enlace"), fuera);
+            } catch (IOException | UnsupportedOperationException | SecurityException e) {
+                org.junit.jupiter.api.Assumptions.assumeTrue(false, "No se pueden crear enlaces simbólicos aquí: " + e);
+            }
+
+            assertThatThrownBy(() -> almacen.guardar("enlace/nuevo.txt", new byte[] {1})).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> almacen.leer("enlace/secreto.txt")).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> almacen.escribir("enlace/otro.txt")).isInstanceOf(IllegalArgumentException.class);
+            assertThat(fuera.resolve("nuevo.txt")).doesNotExist();
+            assertThat(fuera.resolve("otro.txt")).doesNotExist();
+        } finally {
+            try (var lista = Files.list(fuera)) {
+                lista.forEach(p -> p.toFile().delete());
+            }
+            Files.deleteIfExists(fuera);
+        }
+    }
+
+    @Test
+    void unaRutaDeMasDe200CaracteresSeRechaza() {
+        String larga = "a".repeat(197) + ".pdf"; // 201
+        String enElLimite = "a".repeat(196) + ".pdf"; // 200
+
+        assertThatThrownBy(() -> almacen.guardar(larga, new byte[] {1})).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> almacen.leer(larga)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> almacen.escribir(larga)).isInstanceOf(IllegalArgumentException.class);
+        assertThatCode(() -> almacen.guardar(enElLimite, new byte[] {1})).doesNotThrowAnyException();
+    }
 }
