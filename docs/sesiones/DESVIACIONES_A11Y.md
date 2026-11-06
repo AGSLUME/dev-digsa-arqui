@@ -40,6 +40,9 @@ ni los textos ni los `data-testid`:
 | C10 | Botón con petición en curso (`cargando`), en **todas** las pantallas | `ui/boton.ts` | `loading` de Mantine: el botón queda `disabled` y el foco cae al body (al buscar, descargar, enviar, guardar…) | `aria-disabled` y `aria-busy`, sin `disabled`: conserva el foco; el clic (también el implícito de Enter en el formulario) se cancela mientras carga, así que sigue sin haber doble envío (2.4.3) |
 | C11 | Logs del sistema | `paginas/seguridad/logs.*` | «Buscar» y «Ver más» no avisan nada; al irse «Ver más» el foco cae al body; «Ver (N)» se llamaba «Ver los cambios del registro N» (falla 2.5.3) | Región viva con el resultado («N registros.», «N registros más; M en total.»); el foco pasa al primer registro nuevo; el nombre empieza por el texto visible: «Ver (N) cambios del registro M» (la e2e `logs-cambios` busca `/^Ver \(\d+\) cambios del registro/`). Las tablas llevan nombre aunque no desborden |
 
+Textos visibles de C7 y C11 («Restablecer la contraseña», «Cerrar la sesión», «Ver (N) cambios del registro M»): **aprobado por el
+usuario el 2026-11-06** (lo comunicó la integradora al aprobar A5).
+
 Mejoras de A5 que quedan sin aplicar (bajas): el error del teléfono que sale al salir del campo no se anuncia (el lector lo oye al volver
 al campo y en el resumen al guardar, 3.3.1 se cumple); las insignias de una celda no van en lista; en Logs, «—» como valor vacío, el
 separador « · » del resumen de «Antes y después», un aviso de «filtros sin aplicar» (descargar y enviar usan lo aplicado con «Buscar»,
