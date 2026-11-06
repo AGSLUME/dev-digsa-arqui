@@ -100,8 +100,16 @@
   el plan). El bean llega en VA2.7; hasta entonces ningún bean de B debe exigirla para arrancar.
 ## VA2 · Agenda: visitas, solicitudes, propuesta, calendario y mis visitas
 
-- **VA2.0 · Contrato** 0.2.0: `/api/agenda/**`, `/api/calendario/**`, `/api/mis-visitas/**`, `/api/solicitudes/**` y `/api/propuesta/**`, con los textos de §2 del inventario.
-- **VA2.1 · Esquema** (V10–V19): `V10__solicitudes.sql` (de V11) y `V11__propuesta.sql` (de V15), con el trigger de solo borrador.
+- **VA2.S · Revisión de seguridad de la integradora sobre VA1** (primera unidad de VA2, cada punto con prueba):
+  - comun/ValidadorArchivos: el tope se aplica antes de analizar; descompresión hasta 100 MB; sin el genérico msoffice; OOXML sin
+    macros (`vbaProject.bin`), `activeX/` ni `embeddings/` (el monolito los aceptaba: riesgo anotado para que decida el usuario); el
+    enderezado lee solo el EXIF (sin XMP, sin XXE); el nombre en los mensajes va saneado y cortado.
+  - comun/AlmacenDisco: ruta real (enlaces simbólicos), temporal más publicación atómica sin sobrescribir, permisos 0600, tope de 200
+    caracteres. ConfiguracionArchivos: el almacén solo existe si el servicio declara `lume.archivos.carpeta` (sin valor por omisión).
+  - comun/ConfiguracionRecurso: `/interno/**` solo con token de máquina (sin `uid`).
+  - visitas: la pantalla se revisa por ruta antes de leer el cuerpo (403 y no 400); `V10__ajuste_permisos.sql` quita los GRANT sin uso.
+  - Descargas (VA2 y B): Content-Type de una lista cerrada, `nosniff` y `Content-Disposition: attachment` con nombre generado.- **VA2.0 · Contrato** 0.2.0: `/api/agenda/**`, `/api/calendario/**`, `/api/mis-visitas/**`, `/api/solicitudes/**` y `/api/propuesta/**`, con los textos de §2 del inventario.
+- **VA2.1 · Esquema** (V10–V19): `V11__solicitudes.sql` (de V11) y `V12__propuesta.sql` (de V15); V10 la usa VA2.S, con el trigger de solo borrador.
 - **VA2.2 · Visitas:**
   - Operaciones: programar, editar, reprogramar, cancelar, reasignar, mover reparto y detalle.
   - Listados: agenda (≤2000 filas, con alertas de plazo) y `/seguimiento`.

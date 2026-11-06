@@ -19,6 +19,11 @@ info:
        `seguridad` (ADR-002, D2). Un usuario recién creado puede tardar unos segundos en contar.
     5. Una obligación con `fuente` de más de 200 caracteres responde 422 «La fuente de la obligación tiene máximo 200 caracteres.»
        (el monolito dejaba fallar el CHECK de la base con un 500).
+    6. **Archivos subidos (decisión del usuario, 2026-11-06):** no se admiten documentos de Office con macros u objetos activos (OOXML con
+       `vbaProject.bin`, `activeX/` o `embeddings/`) ni el OLE genérico que no es Word ni Excel: «El archivo «X» no es de un tipo admitido
+       (fotos, PDF, Word, Excel, video o texto).». El monolito los aceptaba. El tamaño se revisa antes del contenido. Aplica a todo endpoint
+       que reciba archivos (solicitudes en VA2; evidencias de visitas-b).
+    7. `/interno/**` solo acepta tokens de máquina; la autorización por pantalla se revisa antes de leer el cuerpo (403 y no 400).
 
     **Autorización.** Pantalla CATALOGOS o MAESTROS del token (Coordinador; el Administrador entra a todo). `GET /api/catalogos/municipios`
     solo exige sesión. Sin la pantalla: 403 «No tiene permiso para esta acción.».

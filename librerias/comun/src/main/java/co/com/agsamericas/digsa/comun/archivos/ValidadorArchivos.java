@@ -1,7 +1,6 @@
 package co.com.agsamericas.digsa.comun.archivos;
 
 import co.com.agsamericas.digsa.comun.errores.ErrorNegocio;
-import com.drew.imaging.ImageMetadataReader;
 import com.drew.metadata.Metadata;
 import com.drew.metadata.exif.ExifIFD0Directory;
 import java.awt.Graphics2D;
@@ -32,8 +31,8 @@ public class ValidadorArchivos {
             Map.entry("image/heic", "heic"), Map.entry("image/heif", "heif"), Map.entry("application/pdf", "pdf"),
             Map.entry("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"),
             Map.entry("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"),
+            // Sin el genérico application/x-tika-msoffice (el monolito lo guardaba como «doc»): solo Word o Excel reconocidos (seguridad, MEDIA 2)
             Map.entry("application/msword", "doc"), Map.entry("application/vnd.ms-excel", "xls"),
-            Map.entry("application/x-tika-msoffice", "doc"),
             Map.entry("video/mp4", "mp4"), Map.entry("video/quicktime", "mov"), Map.entry("video/webm", "webm"), Map.entry("video/3gpp", "3gp"),
             Map.entry("text/plain", "txt"), Map.entry("text/markdown", "md"));
 
@@ -44,17 +43,20 @@ public class ValidadorArchivos {
     private final Tika tika = new Tika();
 
     public Valido validar(String nombre, byte[] contenido) {
+        String mostrar = paraMostrar(nombre);
         if (contenido == null || contenido.length == 0) {
-            throw ErrorNegocio.validacion("El archivo «" + nombre + "» está vacío.");
+            throw ErrorNegocio.validacion("El archivo «" + mostrar + "» está vacío.");
+        }
+        // El tope se aplica ANTES de analizar el contenido (seguridad, MEDIA 1): la detección por cabecera ya dice si es video; un ZIP de
+        // más de 25 MB no se llega a descomprimir.
+        long tope = tika.detect(contenido).startsWith("video/") ? MAX_VIDEO : MAX_ARCHIVO;
+        if (contenido.length > tope) {
+            throw new ErrorNegocio(HttpStatus.PAYLOAD_TOO_LARGE, "El archivo «" + mostrar + "» pesa más de " + tope / (1024 * 1024) + " MB.");
         }
         String tipo = tipo(contenido, nombre);
         String extension = TIPOS.get(tipo);
         if (extension == null) {
-            throw ErrorNegocio.validacion("El archivo «" + nombre + "» no es de un tipo admitido (fotos, PDF, Word, Excel, video o texto).");
-        }
-        long tope = tipo.startsWith("video/") ? MAX_VIDEO : MAX_ARCHIVO;
-        if (contenido.length > tope) {
-            throw new ErrorNegocio(HttpStatus.PAYLOAD_TOO_LARGE, "El archivo «" + nombre + "» pesa más de " + tope / (1024 * 1024) + " MB.");
+            throw ErrorNegocio.validacion("El archivo «" + mostrar + "» no es de un tipo admitido (fotos, PDF, Word, Excel, video o texto).");
         }
         byte[] guardar = "image/jpeg".equals(tipo) ? enderezar(contenido) : contenido;
         return new Valido(guardar, tipo, extension, co.com.agsamericas.digsa.reglas.Huellas.sha256(guardar));
@@ -82,6 +84,24 @@ public class ValidadorArchivos {
         };
     }
 
+    static final int MAX_NOMBRE_MOSTRADO = 100;
+
+    /**
+     * El nombre que subió el usuario, tal como se muestra en un mensaje (seguridad, BAJA 5): sin caracteres de control ni de formato
+     * (p. ej. U+202E, que invierte el texto) y cortado a {@link #MAX_NOMBRE_MOSTRADO} caracteres. Nunca se usa para guardar.
+     */
+    static String paraMostrar(String nombre) {
+        if (nombre == null) {
+            return "";
+        }
+        // Control, formato (U+202E…), separadores de línea y párrafo, uso privado y sin asignar (revisión Java de VA2.S, BAJO 8)
+        String limpio = nombre.replaceAll("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\\p{Co}\\p{Cn}]", "");
+        if (limpio.codePointCount(0, limpio.length()) <= MAX_NOMBRE_MOSTRADO) {
+            return limpio;
+        }
+        return new String(limpio.codePoints().limit(MAX_NOMBRE_MOSTRADO - 1).toArray(), 0, MAX_NOMBRE_MOSTRADO - 1) + "…";
+    }
+
     /** Ancho y alto declarados de una imagen sin decodificarla (null si no es una imagen legible). */
     public static int[] dimensiones(byte[] imagen) {
         try (javax.imageio.stream.ImageInputStream in = ImageIO.createImageInputStream(new ByteArrayInputStream(imagen))) {
@@ -103,11 +123,12 @@ public class ValidadorArchivos {
 
     /** Entradas y bytes descomprimidos que se revisan, como máximo, para confirmar un documento de Office (evita las bombas ZIP). */
     static final int MAX_ENTRADAS_ZIP = 5_000;
-    static final long MAX_DESCOMPRIMIDO = 200L * 1024 * 1024;
+    static final long MAX_DESCOMPRIMIDO = 100L * 1024 * 1024;
 
     /**
-     * ¿El ZIP tiene la estructura de un docx o un xlsx? {@code [Content_Types].xml} y la carpeta {@code word/} o {@code xl/}. Lo que no se
-     * pueda leer, o pase los topes de entradas o de tamaño descomprimido, no lo es.
+     * ¿El ZIP tiene la estructura de un docx o un xlsx? {@code [Content_Types].xml} y la carpeta {@code word/} o {@code xl/}, sin macros
+     * ({@code vbaProject.bin}) ni objetos activos o incrustados. Lo que no se pueda leer, o pase los topes de entradas o de tamaño
+     * descomprimido, no lo es.
      */
     static boolean estructuraOffice(byte[] zip, String tipo) {
         String carpeta = tipo.contains("wordprocessingml") ? "word/" : tipo.contains("spreadsheetml") ? "xl/" : null;
@@ -127,7 +148,13 @@ public class ValidadorArchivos {
                 }
                 String n = e.getName();
                 tipos |= "[Content_Types].xml".equals(n);
-                partes |= n.startsWith(carpeta);
+                partes |= n.replace('\\', '/').toLowerCase(java.util.Locale.ROOT).startsWith(carpeta);
+                // Los nombres de las partes OPC no distinguen mayúsculas: se comparan en minúsculas y con «/» (revisión Java de VA2.S, M3)
+                String parte = n.replace('\\', '/').toLowerCase(java.util.Locale.ROOT);
+                if (parte.endsWith("vbaproject.bin") || parte.contains("/activex/") || parte.contains("/embeddings/")
+                        || parte.contains("/externallinks/") || parte.contains("oleobject")) {
+                    return false; // macros u objetos activos: no se admiten (seguridad, MEDIA 2; el monolito no lo revisaba)
+                }
                 for (int r; (r = in.read(buf)) > 0; ) {
                     total += r;
                     if (total > MAX_DESCOMPRIMIDO) {
@@ -176,7 +203,9 @@ public class ValidadorArchivos {
             return jpeg;
         }
         try {
-            Metadata md = ImageMetadataReader.readMetadata(new ByteArrayInputStream(jpeg));
+            // Solo el segmento EXIF: el XMP (XML) nunca se analiza, así no hay XXE posible (seguridad, BAJA 3)
+            Metadata md = com.drew.imaging.jpeg.JpegMetadataReader.readMetadata(new ByteArrayInputStream(jpeg),
+                    java.util.List.of(new com.drew.metadata.exif.ExifReader()));
             ExifIFD0Directory d = md.getFirstDirectoryOfType(ExifIFD0Directory.class);
             if (d == null || !d.containsTag(ExifIFD0Directory.TAG_ORIENTATION)) {
                 return jpeg;

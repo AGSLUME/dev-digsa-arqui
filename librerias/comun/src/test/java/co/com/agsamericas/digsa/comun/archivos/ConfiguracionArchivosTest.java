@@ -37,6 +37,34 @@ class ConfiguracionArchivosTest {
         });
     }
 
+    /** Los servicios que no guardan archivos (seguridad, hola) dependen de comun y no deben dejar de arrancar. */
+    @Test
+    void sinLaPropiedadElContextoArrancaPeroNoHayAlmacen() {
+        runner.run(ctx -> {
+            assertThat(ctx).hasNotFailed();
+            assertThat(ctx).doesNotHaveBean(Almacen.class);
+            assertThat(ctx).hasSingleBean(ValidadorArchivos.class);
+        });
+    }
+
+    @Test
+    void unComponenteQueExigeAlmacenSinLaPropiedadHaceFallarElContexto() {
+        runner.withUserConfiguration(ExigeAlmacen.class).run(ctx -> assertThat(ctx).hasFailed());
+    }
+
+    @Test
+    void unComponenteQueExigeAlmacenArrancaConLaPropiedad(@TempDir Path carpeta) {
+        runner.withUserConfiguration(ExigeAlmacen.class)
+                .withPropertyValues("lume.archivos.carpeta=" + carpeta.toString().replace('\\', '/'))
+                .run(ctx -> assertThat(ctx).hasNotFailed().hasSingleBean(ExigeAlmacen.class));
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class ExigeAlmacen {
+        ExigeAlmacen(Almacen almacen) {
+        }
+    }
+
     @Test
     void respetaUnAlmacenPropio() {
         runner.withUserConfiguration(AlmacenPropio.class).run(ctx -> {

@@ -202,6 +202,28 @@ class EsquemaTest extends PruebaIntegracion {
         assertThatCode(() -> jdbc.sql("UPDATE par_parametros SET valor = valor WHERE clave = 'km_mismo_dia'").update()).doesNotThrowAnyException();
     }
 
+    /** V10__ajuste_permisos: la app solo edita parámetros y catálogos existentes y no escribe los festivos (revisión de seguridad, BAJA 9). */
+    @Test
+    void laAppNoInsertaParametrosNiCatalogosNiEscribeFestivos() {
+        assertThatThrownBy(() -> jdbc.sql("INSERT INTO par_parametros (clave, valor) VALUES ('clave_de_prueba_v10', 'x')").update())
+                .isInstanceOf(DataAccessException.class).hasStackTraceContaining("permission denied");
+        assertThatThrownBy(() -> jdbc.sql("INSERT INTO catalogos (codigo, nombre) VALUES ('cat_prueba_v10', 'Prueba')").update())
+                .isInstanceOf(DataAccessException.class).hasStackTraceContaining("permission denied");
+        assertThatThrownBy(() -> jdbc.sql("INSERT INTO par_festivos (fecha, motivo) VALUES (DATE '2099-01-01', 'prueba')").update())
+                .isInstanceOf(DataAccessException.class).hasStackTraceContaining("permission denied");
+        assertThatThrownBy(() -> jdbc.sql("UPDATE par_festivos SET motivo = 'x' WHERE false").update())
+                .isInstanceOf(DataAccessException.class).hasStackTraceContaining("permission denied");
+        assertThatThrownBy(() -> jdbc.sql("DELETE FROM par_festivos WHERE false").update())
+                .isInstanceOf(DataAccessException.class).hasStackTraceContaining("permission denied");
+    }
+
+    @Test
+    void laAppSiLeeFestivosYSiEditaParametrosYCatalogosExistentes() {
+        assertThatCode(() -> jdbc.sql("SELECT count(*) FROM par_festivos").query(Long.class).single()).doesNotThrowAnyException();
+        assertThatCode(() -> jdbc.sql("UPDATE par_parametros SET valor = valor WHERE clave = 'km_mismo_dia'").update()).doesNotThrowAnyException();
+        assertThatCode(() -> jdbc.sql("UPDATE catalogos SET nombre = nombre WHERE false").update()).doesNotThrowAnyException();
+    }
+
     @Test
     void lasFuerzasYLosValoresDeCatalogoSiSePuedenBorrar() {
         String f = letras(5);

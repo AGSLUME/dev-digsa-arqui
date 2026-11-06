@@ -20,6 +20,14 @@ class PlazosAgendaTest extends FixturaAgenda {
 
     @Autowired
     PlazosAgenda plazosAgenda;
+    @Autowired
+    org.testcontainers.postgresql.PostgreSQLContainer postgres;
+
+    /** V10: el rol de la aplicación ya no escribe par_festivos; el festivo de ajuste lo carga el rol de migraciones (como una migración). */
+    private org.springframework.jdbc.core.simple.JdbcClient ddl() {
+        return org.springframework.jdbc.core.simple.JdbcClient.create(new org.springframework.jdbc.datasource.DriverManagerDataSource(
+                postgres.getJdbcUrl(), "visitas_ddl", "visitas-ddl-solo-prueba"));
+    }
 
     private void vencerCache() {
         reloj.avanzar(Duration.ofSeconds(31));
@@ -62,7 +70,7 @@ class PlazosAgendaTest extends FixturaAgenda {
         int nuevo = original + 7;
         try {
             fijar("notif_dias_opl", Integer.toString(nuevo));
-            jdbc.sql("INSERT INTO par_festivos (fecha, motivo) VALUES (:f, 'Festivo de prueba VA1.6')").param("f", festivo).update();
+            ddl().sql("INSERT INTO visitas.par_festivos (fecha, motivo) VALUES (:f, 'Festivo de prueba VA1.6')").param("f", festivo).update();
 
             reloj.avanzar(Duration.ofSeconds(29));
             Plazos antes = plazosAgenda.plazos();
@@ -75,7 +83,7 @@ class PlazosAgendaTest extends FixturaAgenda {
             assertThat(despues.esHabil(festivo)).as("el festivo de ajuste ya es no hábil").isFalse();
         } finally {
             fijar("notif_dias_opl", valorOriginal);
-            jdbc.sql("DELETE FROM par_festivos WHERE fecha = :f").param("f", festivo).update();
+            ddl().sql("DELETE FROM visitas.par_festivos WHERE fecha = :f").param("f", festivo).update();
             vencerCache();
             plazosAgenda.plazos();
         }
