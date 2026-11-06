@@ -69,6 +69,23 @@ Unidades, en este orden:
 
 **Pruebas**: integración portada de `UsuariosYClavesApiTest`, `RolesApiTest`, `SesionesYClaveInicialApiTest` (administrador) y `CrearAdministradorTest`. Outbox con un RabbitMQ de Testcontainers (`rabbitmq:4.3.7-management` con digest), idempotencia y orden por versión.
 
+**Entregado:** S2.1 y S2-OUTBOX (857aa86), en develop desde 31141b4.
+
+**Condiciones de la integradora para cerrar S2 (2026-11-06)**, además de lo pendiente: exportación, importar, copia de puntos, CrearAdministrador, alcance cerrado y B-b.
+- **M1 · Roles inactivos.** `reemplazarAsignados` conserva los roles inactivos, pero `asignacion()` solo valida los activos. Al reactivar un rol puede quedar una mezcla que amplía el alcance (contra ADR-004). Hay que validar contra TODAS las asignaciones, o borrar los inactivos al reemplazar, y revalidar a los usuarios del rol al reactivarlo. Con prueba.
+- **M2 · Consumidor del gateway.** Cola `gateway.sesiones` para `sesion.cerrada`, `usuario.permisos_cambiados` y `usuario.estado_cambiado`. Aplica solo sid, uid y motivo del sobre validado. Prueba: una sesión cerrada por el administrador da 401 sin esperar la caché.
+- **M3 · Minimización (Ley 1581).**
+  - `permisos_cambiados` y `estado_cambiado` llevan una foto reducida (uid, activo, bloqueadoHasta, perfiles, pantallas y version), o se separan los tipos.
+  - `<origen>.sin-ruta` lleva TTL (por ejemplo 7 días).
+- **Bajos:**
+  - el despachador libera el lote si falla el UPDATE de publicado;
+  - restablecer a un usuario inactivo se rechaza;
+  - el 502 da un mensaje genérico, sin `e.error()` del SMTP;
+  - `contarAdministradoresActivos` solo cuenta administradores con credencial usable (clave definida y sin bloqueo);
+  - en el outbox solo se pueden borrar los publicados;
+  - `permisosCambiados` va por lotes o con tope;
+  - riesgo aceptado por paridad: un administrador puede tomar la cuenta de otro (correo o clave inicial).
+
 ## S3 · Auditoría y logs como servicio
 
 **Qué trae**: `RegistroBitacora`, `FiltroBitacora`, `reglas/Bitacora` (lista blanca, secretos, cortes, cambios y enmascaramiento, Ley 1581), `RepositorioLogs`, `ControladorLogs` (consulta paginada por llave, exportación xlsx/csv con encabezado, envío por correo) y `ProveedorReporteLogs`.
