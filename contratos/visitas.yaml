@@ -17,6 +17,8 @@ info:
     3. Un catálogo no puede tener el código `fuerzas` ni `regionales` (en el monolito quedaba inalcanzable por la ruta).
     4. Los usuarios (alcance de fuerza, punto y regional; perfil Auditor) se leen de la copia local que mantienen los eventos de
        `seguridad` (ADR-002, D2). Un usuario recién creado puede tardar unos segundos en contar.
+    5. Una obligación con `fuente` de más de 200 caracteres responde 422 «La fuente de la obligación tiene máximo 200 caracteres.»
+       (el monolito dejaba fallar el CHECK de la base con un 500).
 
     **Autorización.** Pantalla CATALOGOS o MAESTROS del token (Coordinador; el Administrador entra a todo). `GET /api/catalogos/municipios`
     solo exige sesión. Sin la pantalla: 403 «No tiene permiso para esta acción.».
@@ -497,8 +499,8 @@ paths:
       summary: Crear una obligación
       description: |
         201 `{id, mensaje: «Obligación creada.»}`. 422: «El prestador debe ser el OPL o la farmacia alterna.» · «El código de la obligación
-        empieza por OB- (p. ej. OB-OPL-01).» · «El texto de la obligación debe tener de 10 a 2000 caracteres.» · «Ya existe la obligación
-        X.».
+        empieza por OB- (p. ej. OB-OPL-01).» · «El texto de la obligación debe tener de 10 a 2000 caracteres.» · «La fuente de la
+        obligación tiene máximo 200 caracteres.» · «Ya existe la obligación X.».
       security:
         - sesionGateway: []
       requestBody:

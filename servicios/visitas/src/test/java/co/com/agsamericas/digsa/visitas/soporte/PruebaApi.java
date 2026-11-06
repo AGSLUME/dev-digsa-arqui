@@ -1,10 +1,6 @@
 package co.com.agsamericas.digsa.visitas.soporte;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
 import co.com.agsamericas.digsa.comun.auditoria.EventoAuditoria;
 import co.com.agsamericas.digsa.reglas.Bitacora;
@@ -17,6 +13,7 @@ import java.util.stream.Collectors;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 /**
@@ -32,19 +29,19 @@ public abstract class PruebaApi extends PruebaIntegracion {
     // ---------------------------------------------------------------- peticiones
 
     protected ResultActions get(String url, RequestPostProcessor token) throws Exception {
-        return mvc.perform(con(get(url), token));
+        return mvc.perform(con(MockMvcRequestBuilders.get(url), token));
     }
 
     protected ResultActions post(String url, RequestPostProcessor token, Object cuerpo) throws Exception {
-        return mvc.perform(con(post(url), token).contentType(MediaType.APPLICATION_JSON).content(json(cuerpo)));
+        return mvc.perform(con(MockMvcRequestBuilders.post(url), token).contentType(MediaType.APPLICATION_JSON).content(json(cuerpo)));
     }
 
     protected ResultActions put(String url, RequestPostProcessor token, Object cuerpo) throws Exception {
-        return mvc.perform(con(put(url), token).contentType(MediaType.APPLICATION_JSON).content(json(cuerpo)));
+        return mvc.perform(con(MockMvcRequestBuilders.put(url), token).contentType(MediaType.APPLICATION_JSON).content(json(cuerpo)));
     }
 
     protected ResultActions delete(String url, RequestPostProcessor token) throws Exception {
-        return mvc.perform(con(delete(url), token));
+        return mvc.perform(con(MockMvcRequestBuilders.delete(url), token));
     }
 
     private static MockHttpServletRequestBuilder con(MockHttpServletRequestBuilder b, RequestPostProcessor token) {
@@ -117,6 +114,18 @@ public abstract class PruebaApi extends PruebaIntegracion {
         s.append('"');
     }
 
+    /** Cuerpo de la respuesta como texto UTF-8. */
+    protected static String cuerpo(ResultActions r) throws Exception {
+        return r.andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /** El {@code id} numérico de un cuerpo {@code {id, mensaje}}. */
+    protected static long idCreado(ResultActions r) throws Exception {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"id\"\\s*:\\s*(\\d+)").matcher(cuerpo(r));
+        assertThat(m.find()).as("el cuerpo trae id: %s", cuerpo(r)).isTrue();
+        return Long.parseLong(m.group(1));
+    }
+
     // ---------------------------------------------------------------- datos únicos
 
     protected static long secuencia() {
@@ -158,7 +167,7 @@ public abstract class PruebaApi extends PruebaIntegracion {
                 + "alcance_regional, version) VALUES (:uid, :us, :n, :d, :c, :a, CAST(:p AS smallint[]), :af, :ap, :ar, 1)")
                 .param("uid", uid).param("us", "u" + uid).param("n", nombre).param("d", "D" + uid)
                 .param("c", "u" + uid + "@visitas-a.prueba.local").param("a", activo).param("p", arreglo)
-                .param("af", alcanceFuerza).param("ap", alcancePunto, java.sql.Types.BIGINT).param("ar", alcanceRegional, java.sql.Types.BIGINT)
+                .param("af", alcanceFuerza, java.sql.Types.VARCHAR).param("ap", alcancePunto, java.sql.Types.BIGINT).param("ar", alcanceRegional, java.sql.Types.BIGINT)
                 .update();
         return uid;
     }

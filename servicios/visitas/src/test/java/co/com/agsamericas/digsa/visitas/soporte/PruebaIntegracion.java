@@ -4,6 +4,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 
 import co.com.agsamericas.digsa.comun.seguridad.ClaimsLume;
+import co.com.agsamericas.digsa.comun.seguridad.ConvertidorJwt;
 import co.com.agsamericas.digsa.reglas.Fechas;
 import java.util.Arrays;
 import java.util.List;
@@ -63,7 +64,9 @@ public abstract class PruebaIntegracion {
 
     /**
      * Token completo. {@code alcance} (opcional, puede ser null) es el mapa del claim {@code alcance} como lo emite seguridad:
-     * {@code {tipo: fuerza, fuerza: EJC}}, {@code {tipo: regional, regional: 3}} o {@code {tipo: punto, punto: 7}}.
+     * {@code {tipo: fuerza, fuerza: EJC}}, {@code {tipo: regional, regional: 3}} o {@code {tipo: esm, punto: 7}} (ClaimsToken de seguridad).
+     * Las autoridades las arma el {@link ConvertidorJwt} real del servicio (PERFIL_, PANTALLA_ y SCOPE_), no el convertidor por defecto de
+     * spring-security-test, que solo mira {@code scope}.
      */
     protected static RequestPostProcessor token(long uid, List<String> perfiles, Map<String, Object> alcance, String... pantallas) {
         return jwt().jwt(j -> {
@@ -74,12 +77,17 @@ public abstract class PruebaIntegracion {
             if (alcance != null) {
                 j.claim(ClaimsLume.ALCANCE, alcance);
             }
-        });
+        }).authorities(PruebaIntegracion::autoridades);
     }
 
     /** Token de máquina (client_credentials): solo {@code scope}, sin {@code uid}. Para {@code /interno/**}. */
     protected static RequestPostProcessor tokenDeMaquina(String... scopes) {
-        return jwt().jwt(j -> j.claim("scope", Arrays.asList(scopes)).subject("servicio-prueba"));
+        return jwt().jwt(j -> j.claim("scope", Arrays.asList(scopes)).subject("servicio-prueba")).authorities(PruebaIntegracion::autoridades);
+    }
+
+    private static java.util.Collection<org.springframework.security.core.GrantedAuthority> autoridades(
+            org.springframework.security.oauth2.jwt.Jwt jwt) {
+        return new ConvertidorJwt().convert(jwt).getAuthorities();
     }
 
     @TestConfiguration(proxyBeanMethods = false)
