@@ -46,8 +46,11 @@ public class ServicioRoles {
     private final BitacoraSeguridad bitacora;
     private final TransactionTemplate tx;
     private final Clock reloj;
+    private final EventosUsuario eventos;
 
-    public ServicioRoles(JdbcClient jdbc, RepositorioUsuarios usuarios, BitacoraSeguridad bitacora, TransactionTemplate tx, Clock reloj) {
+    public ServicioRoles(JdbcClient jdbc, RepositorioUsuarios usuarios, BitacoraSeguridad bitacora, TransactionTemplate tx, Clock reloj,
+                         EventosUsuario eventos) {
+        this.eventos = eventos;
         this.jdbc = jdbc;
         this.usuarios = usuarios;
         this.bitacora = bitacora;
@@ -129,6 +132,9 @@ public class ServicioRoles {
                         .param("id", id).update();
                 jdbc.sql("DELETE FROM perfiles_pantallas WHERE perfil_id = :id").param("id", id).update();
                 guardarPantallas(id, nuevas);
+                if (!previas.equals(new TreeSet<>(codigos(nuevas)))) {
+                    permisosCambiados(id);
+                }
                 return new Hecho(new Previo((String) fila.get("nombre"), (String) fila.get("descripcion"), previas), nuevas);
             });
             antes = h.antes();
@@ -155,6 +161,9 @@ public class ServicioRoles {
             Boolean previo = jdbc.sql("SELECT activo FROM perfiles WHERE id = :id AND base_id IS NOT NULL FOR NO KEY UPDATE").param("id", id)
                     .query(Boolean.class).optional().orElseThrow(() -> ErrorNegocio.noEncontrado("El rol no existe."));
             jdbc.sql("UPDATE perfiles SET activo = :a WHERE id = :id").param("a", activo).param("id", id).update();
+            if (previo != activo) {
+                permisosCambiados(id);
+            }
             long n = jdbc.sql("SELECT count(*) FROM usuarios_perfiles up JOIN usuarios u ON u.id = up.usuario_id WHERE up.perfil_id = :id AND u.activo")
                     .param("id", id).query(Long.class).single();
             return new Hecho(previo, n);
@@ -163,6 +172,16 @@ public class ServicioRoles {
                 + h.conRol() + " usuarios activos lo tienen)", Map.of("activo", h.antes()), Map.of("activo", activo), Set.of(), quien.id(),
                 quien.usuario());
         return h.conRol();
+    }
+
+    /**
+     * Las pantallas efectivas de cada usuario con el rol cambiaron: {@code usuario.permisos_cambiados} con su foto, dentro de la
+     * transacción del rol. Bloqueo en el orden fijo (rol → administradores activos → usuarios por id), sin cruzarse con la edición de usuarios.
+     */
+    private void permisosCambiados(int rol) {
+        List<Long> afectados = eventos.conAsignado(rol);
+        eventos.bloquearEnOrden(afectados);
+        afectados.forEach(uid -> eventos.publicar("usuario.permisos_cambiados", uid));
     }
 
     private void guardarPantallas(int id, Set<Pantallas> pantallas) {

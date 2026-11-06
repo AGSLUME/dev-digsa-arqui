@@ -81,6 +81,12 @@ Unidades, en este orden:
   - Una celda que empieza por `=`, `+`, `-`, `@`, tabulador o retorno de carro va con un apóstrofo delante (en xlsx, además, como celda de texto).
   - Se quitan los caracteres de control.
   - El mock de angular-base ya lo hace así.
+- `PublicadorAuditoria` por el outbox (decisión de la integradora, 2026-11-06):
+  - `publicar` va en la misma transacción del cambio; si falla, la operación falla;
+  - `publicarIndependiente` usa REQUIRES_NEW, para lo que fracasa o se deniega (login_fallido, captcha_fallido, mfa_fallido, 403, bloqueo), y funciona también sin transacción;
+  - ningún catch se traga el error;
+  - pruebas: un fallo del outbox revierte el cambio; un login_fallido queda auditado aunque la respuesta sea 401; publicarIndependiente funciona sin transacción;
+  - en S2-OUTBOX solo se agregó la firma a la interfaz.
 - Campo opcional de cambios en `EventoAuditoria` (commit «comun:»): el constructor actual se conserva, `hola` compila sin cambios y los datos personales salen solo como «modificado».
 
 **Pruebas**: `LogsApiTest` y `BitacoraTest` portados, consumidor idempotente, `origen` falsificado rechazado, exportación por lotes sin agotar el pool, y un registro con descripción `=HYPERLINK(...)` que sale neutralizado en xlsx y en csv.

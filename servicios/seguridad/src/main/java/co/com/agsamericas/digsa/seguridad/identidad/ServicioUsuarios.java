@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -63,10 +64,12 @@ public class ServicioUsuarios {
     private final Clock reloj;
     private final RepositorioSesiones sesiones;
     private final ParametrosSeguridad parametros;
+    private final EventosUsuario eventos;
 
     public ServicioUsuarios(RepositorioUsuarios usuarios, RepositorioCopias copias, ServicioClaves claves, ServicioSesiones cierres,
                             PasswordEncoder codificador, BitacoraSeguridad bitacora, TransactionTemplate tx, Clock reloj,
-                            RepositorioSesiones sesiones, ParametrosSeguridad parametros) {
+                            RepositorioSesiones sesiones, ParametrosSeguridad parametros, EventosUsuario eventos) {
+        this.eventos = eventos;
         this.sesiones = sesiones;
         this.parametros = parametros;
         this.usuarios = usuarios;
@@ -144,11 +147,13 @@ public class ServicioUsuarios {
                 String claveAleatoria = codificador.encode(Huellas.secreto(24));
                 String inicialCodificada = claveInicial == null ? null : codificador.encode(claveInicial);
                 long id = tx.execute(t -> {
+                    eventos.bloquearRoles(asignacion.ids()); // orden global: roles → usuario
                     long nuevoId = usuarios.crear(nombre, documento, telefono, usuario, correo, claveAleatoria, fuerza, punto, regional, ahora);
                     usuarios.reemplazarAsignados(nuevoId, asignacion.ids());
                     if (inicialCodificada != null) {
                         usuarios.asignarClaveInicial(nuevoId, inicialCodificada, ahora);
                     }
+                    eventos.publicar("usuario.creado", nuevoId);
                     return nuevoId;
                 });
                 if (inicialCodificada != null) {
@@ -173,6 +178,7 @@ public class ServicioUsuarios {
             Usuario antes = tx.execute(t -> {
                 // Dos administradores editando al mismo usuario: uno espera al otro y el segundo compara contra lo que dejó el primero.
                 // Orden de bloqueo fijo (administradores activos → usuario) para no cruzarse con otra transacción
+                eventos.bloquearRoles(asignacion.ids()); // orden global: roles → administradores activos → usuario
                 boolean quitaAdministrador = !asignacion.ids().contains(Perfil.ADMINISTRADOR.id());
                 if (quitaAdministrador) {
                     usuarios.bloquearAdministradoresActivos();
@@ -187,6 +193,10 @@ public class ServicioUsuarios {
                 if (!correo.equals(actual.correo())) {
                     usuarios.anularEnlace(editado); // el enlace enviado al correo anterior deja de servir
                 }
+                // Perfiles, roles o alcance: permisos_cambiados (el gateway fuerza el refresco del token); lo demás, actualizado
+                boolean permisos = !actual.asignados().equals(asignacion.ids()) || !Objects.equals(actual.alcanceFuerza(), fuerza)
+                        || !Objects.equals(actual.alcancePunto(), punto) || !Objects.equals(actual.alcanceRegional(), regional);
+                eventos.publicar(permisos ? "usuario.permisos_cambiados" : "usuario.actualizado", editado);
                 return actual;
             });
             bitacora.escribirCambios(Bitacora.Operacion.ACTUALIZACION, "usuario_editado", "Usuario " + usuario + " editado",
@@ -225,6 +235,9 @@ public class ServicioUsuarios {
                 usuarios.anularEnlace(id);
                 cerrada = cierres.cerrarDeUsuario(id, Motivo.INACTIVO);
             }
+            if (u.activo() != activo) {
+                eventos.publicar("usuario.estado_cambiado", id);
+            }
             return new Cambio(u, cerrada);
         });
         Usuario u = c.antes();
@@ -240,7 +253,14 @@ public class ServicioUsuarios {
     /** Quita el bloqueo por intentos fallidos antes de los 15 minutos. @return si estaba bloqueado */
     public boolean desbloquear(long id, Permisos.Quien quien) {
         Usuario u = usuarios.porId(id).orElseThrow(() -> ErrorNegocio.noEncontrado("El usuario no existe."));
-        boolean estaba = usuarios.desbloquear(id, reloj.instant());
+        Instant ahora = reloj.instant();
+        boolean estaba = Boolean.TRUE.equals(tx.execute(t -> {
+            boolean b = usuarios.desbloquear(id, ahora);
+            if (b) {
+                eventos.publicar("usuario.actualizado", id);
+            }
+            return b;
+        }));
         if (estaba) {
             bitacora.escribir(Bitacora.Operacion.ACTUALIZACION, "usuario_desbloqueado", "Usuario " + u.usuario() + " desbloqueado por el administrador",
                     quien.id(), quien.usuario(), null);
