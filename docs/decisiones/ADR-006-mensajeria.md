@@ -21,7 +21,9 @@ Hay flujos asíncronos entre servicios: auditoría (todos → `seguridad`), corr
     |---|---|---|
     | `seguridad.eventos` | gateway | `sesion.*` (`sesion.cerrada`, `sesion.refrescar {uid, motivo, version}`; nunca la foto del usuario) |
     | `seguridad.eventos` | visitas, reportes | `usuario.*`, `cuenta.*` |
-    | `visitas.eventos` | reportes | `visita.*`, `hallazgo.*` |
+    | `visitas.eventos` | reportes | `visita.*`, `hallazgo.*`, `punto.*`, `regional.*`, `fuerza.*`, `checklist.*`, `catalogo.*` (proyección y sus maestros) |
+    | `seguridad.eventos` | notificaciones | `usuario.*`, `cuenta.*` (destinatarios de alertas; sin teléfono) |
+    | `reportes.eventos` | notificaciones | `alerta.*` (`reporte_lento`) |
     | `visitas.eventos` | notificaciones | `alerta.*`, `aviso.*` |
     | `visitas.eventos` | seguridad | `auditoria.*`, `punto.*`, `regional.*`, `fuerza.*` (copia de maestros) |
     | `reportes`/`notificaciones.eventos` | seguridad | `auditoria.*` |

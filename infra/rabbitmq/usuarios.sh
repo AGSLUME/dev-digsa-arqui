@@ -60,8 +60,12 @@ done
 tema gateway seguridad.eventos "$NADA" '^sesion\..*$'
 tema visitas seguridad.eventos "$NADA" '^(usuario|cuenta)\..*$'
 tema reportes seguridad.eventos "$NADA" '^(usuario|cuenta)\..*$'
-tema reportes visitas.eventos "$NADA" '^(visita|hallazgo)\..*$'
+# reportes: la proyección de visitas y sus maestros (T-2 del plan de reportes)
+tema reportes visitas.eventos "$NADA" '^(visita|hallazgo|punto|regional|fuerza|checklist|catalogo)\..*$'
 tema notificaciones visitas.eventos "$NADA" '^(alerta|aviso)\..*$'
+# notificaciones: destinatarios de alertas y bloqueo_masivo (correo de la foto de usuario.*; sin teléfono) y reporte_lento de reportes
+tema notificaciones seguridad.eventos "$NADA" '^(usuario|cuenta)\..*$'
+tema notificaciones reportes.eventos "$NADA" '^alerta\..*$'
 # visitas recibe el resultado de los envíos que pidió (acta: la visita se cierra al generarla y el correo sale después; D-N1)
 tema visitas notificaciones.eventos "$NADA" '^envio\..*$'
 # seguridad consume la auditoría de todos (ADR-002/006); en su propio exchange conserva la escritura
