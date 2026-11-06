@@ -61,8 +61,15 @@ Unidades, en este orden:
 - `seguridad` consume la auditoría de todos los exchanges (`*.eventos`, clave `auditoria.#`), valida que `origen` coincida con el exchange y escribe en `log_transacciones` (particionada por mes, solo `SELECT, INSERT` para el rol de aplicación, sin purga).
 - `/api/logs`, `/api/logs/opciones`, `/api/logs/exportar` y `/api/logs/enviar`, con los mismos filtros, topes (92 días con texto, 200 000 filas) y textos. Para xlsx: Apache POI con versión fija; lo justifico en la entrega.
 - API interna para el reporte `logs_auditoria` de `reportes` (ADR-002: `reportes` lo pide por API).
+- **Requisito de la integradora (2026-11-05, de A5) para `/api/logs/exportar` y `/enviar`, en xlsx y csv: neutralizar la inyección de fórmulas.**
+  - Una celda que empieza por `=`, `+`, `-`, `@`, tabulador o retorno de carro va con un apóstrofo delante (en xlsx, además, como celda de texto).
+  - Se quitan los caracteres de control.
+  - El mock de angular-base ya lo hace así.
+- Campo opcional de cambios en `EventoAuditoria` (commit «comun:»): el constructor actual se conserva, `hola` compila sin cambios y los datos personales salen solo como «modificado».
 
-**Pruebas**: `LogsApiTest` y `BitacoraTest` portados, consumidor idempotente, `origen` falsificado rechazado, exportación por lotes sin agotar el pool.
+**Pruebas**: `LogsApiTest` y `BitacoraTest` portados, consumidor idempotente, `origen` falsificado rechazado, exportación por lotes sin agotar el pool, y un registro con descripción `=HYPERLINK(...)` que sale neutralizado en xlsx y en csv.
+
+**Aviso de la integradora para las pruebas con el gateway real:** en WebKit, la cookie `XSRF-TOKEN` aparece en `document.cookie` un instante después de la respuesta de `GET /api/auth/inicio`. La SPA espera hasta 500 ms. Si la primera escritura da 419, ese es el origen; no hay que cambiar nada.
 
 ## S4 · Convivencia con digsa-java (parche + pasos, sin commit en digsa-java)
 
