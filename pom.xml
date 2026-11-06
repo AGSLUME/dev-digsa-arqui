@@ -38,6 +38,12 @@
              sin CVE en OSV. Misma línea que el monolito (tika 3.2.3, metadata-extractor 2.19.0). Solo tika-core (detección por contenido). -->
         <tika.version>3.3.3</tika.version>
         <metadata-extractor.version>2.22.0</metadata-extractor.version>
+        <!-- Acta PDF, QR del OPL y Excel, pedido de visitas-b (D-T3) y compartido con seguridad (S3, logs). Verificadas 2026-11-06 en
+             Central: SHA-1, firma .asc y sin CVE en OSV (también xmlbeans 5.3.0 y commons-compress 1.28.0). Misma línea que el monolito.
+             OpenPDF 2.0.x conserva el paquete com.lowagie; sus dependencias BouncyCastle, icu4j y fop son opcionales y no entran. -->
+        <openpdf.version>2.0.5</openpdf.version>
+        <zxing.version>3.5.4</zxing.version>
+        <poi.version>5.5.1</poi.version>
         <lume.version>${project.version}</lume.version>
     </properties>
 
@@ -59,6 +65,26 @@
                 <groupId>com.drewnoakes</groupId>
                 <artifactId>metadata-extractor</artifactId>
                 <version>${metadata-extractor.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.librepdf</groupId>
+                <artifactId>openpdf</artifactId>
+                <version>${openpdf.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.zxing</groupId>
+                <artifactId>core</artifactId>
+                <version>${zxing.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.poi</groupId>
+                <artifactId>poi</artifactId>
+                <version>${poi.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.poi</groupId>
+                <artifactId>poi-ooxml</artifactId>
+                <version>${poi.version}</version>
             </dependency>
             <dependency>
                 <groupId>co.com.agsamericas.digsa</groupId>
