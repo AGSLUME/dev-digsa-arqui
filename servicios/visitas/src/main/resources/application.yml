@@ -1,0 +1,54 @@
+# Servicio visitas (ADR-002). Ningún secreto tiene valor por defecto: vienen del .env (local) o de Vault (cierre).
+server:
+  port: ${VISITAS_PUERTO:9102}
+  # X-Forwarded-* solo se aceptan del gateway (ADR-003): RemoteIpValve con proxies internos acotados.
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      internal-proxies: ${LUME_PROXIES_INTERNOS:127\.0\.0\.1|0:0:0:0:0:0:0:1}
+
+spring:
+  application:
+    name: visitas
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://${PG_HOST:localhost}:${PG_PUERTO:5440}/lume
+    username: ${VISITAS_DB_USUARIO:visitas}
+    password: ${VISITAS_DB_CLAVE:}
+    hikari:
+      schema: visitas
+      maximum-pool-size: ${VISITAS_DB_POOL:10}
+  flyway:
+    # D8 (ADR-005): Flyway con el dueño del esquema (DDL); la aplicación con el rol «visitas», que solo tiene los GRANT de cada migración.
+    user: ${VISITAS_DB_USUARIO_DDL:visitas_ddl}
+    password: ${VISITAS_DB_CLAVE_DDL:}
+    schemas: visitas
+    default-schema: visitas
+    create-schemas: false
+    # Dos sesiones migran el mismo esquema en paralelo: A usa V1–V199 y B V200–V399 (ACUERDOS_OLEADA_2.md).
+    out-of-order: true
+    placeholders:
+      rol_app: ${VISITAS_DB_USUARIO:visitas}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # El emisor es la URL pública del gateway (ADR-004); las claves se piden por la red interna.
+          issuer-uri: ${LUME_EMISOR:http://localhost:9000}
+          jwk-set-uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}/oauth2/jwks
+          # Audiencia por destinatario: visitas solo acepta tokens dirigidos a él.
+          audiences: visitas
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# Logs JSON (ADR-009): fuera de las pruebas se activan con LOGGING_STRUCTURED_FORMAT_CONSOLE=logstash (infra/.env).

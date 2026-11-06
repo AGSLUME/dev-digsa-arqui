@@ -23,6 +23,7 @@
         <module>librerias/comun</module>
         <module>servicios/gateway</module>
         <module>servicios/seguridad</module>
+        <module>servicios/visitas</module>
         <module>servicios/hola</module>
     </modules>
 
