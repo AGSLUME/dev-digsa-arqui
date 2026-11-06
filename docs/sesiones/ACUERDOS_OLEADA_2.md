@@ -27,6 +27,25 @@ Leer junto con `docs/decisiones/` (ADR-001..014) y `librerias/comun/README.md`. 
 - **D6 · Parámetros**: en `visitas` solo las claves de visitas; las de presupuesto se quedan en el monolito y las de bandeja/alertas pasan a `notificaciones`. La pestaña muestra menos claves: diferencia anotada en el contrato.
 - **D7 · e2e**: contra el **gateway y los servicios reales** de la sesión (seguridad real incluida); el mock de `frontend/mock` no se amplía para visitas.
 
+## Sesión REPORTES Y NOTIFICACIONES (abierta 2026-11-06): lo ya decidido que la afecta
+
+Son **dos servicios** (`reportes` y `notificaciones`, ADR-002), cada uno con su esquema, sus dos roles de BD y su usuario de RabbitMQ.
+
+- **Alcance precisado frente al prompt:**
+  - `exportacion` y la pantalla **Exportación** **no** son de esta sesión: van a `visitas` (VISITAS B; ADR-002 y decisión del usuario D-N2: exportación completa solo de visitas).
+  - **Sí** son de esta sesión: **alertas** (`/api/alertas`, pantalla Alertas, `alertas.spec`; ADR-002 y D-T1 de visitas-b) y la pestaña **Descargas del día** de Reportes (motorreportes; frontera de visitas-a).
+  - Reportes de presupuesto o analítica: se quedan en el monolito (ADR-008), marcados en docs.
+- **Contratos ya acordados con visitas** (consultar `contratos/eventos/visitas.yaml` y `ACUERDOS` de visitas):
+  - **Notificación previa de una visita**: llamada **HTTP síncrona** a `notificaciones` (`client_credentials`, alcance `notificaciones:enviar`, Resilience4j), porque su resultado decide si la visita queda `notificada`. Visitas lo resuelve hoy con un adaptador SMTP provisional que se retira cuando exista `notificaciones`.
+  - **Correo del acta** (D-N1): la visita se cierra al generar el acta; visitas publica `aviso.acta_generada` y `notificaciones` responde con el evento **`envio.resultado`** `{referencia "acta:{id}", estado enviado|agotado, intentos, ultimoError?}` en `notificaciones.eventos` (visitas lo consume en `visitas.envios`). Reintentos automáticos y alerta al administrador si se agotan.
+  - **Plantillas** de visitas (`PlantillasAgenda`, `PlantillasEjecucion`, `PlantillasOpl`): viven en `notificaciones`; visitas manda clave + variables.
+  - **Alertas**: visitas publica `alerta.*` (`alerta.intervencion_inmediata`, `plan_opl_vencido`, `tarea_diaria_fallida`, `integridad_archivo`).
+  - **Reportes de visitas** (`motorreportes`, `dashboard_*`): sobre una **proyección** alimentada por `visita.*` y `hallazgo.*` (ADR-002), con carga inicial por API; nunca leyendo la base de visitas.
+- **RabbitMQ** (matriz del ADR-006, ya aplicada): `notificaciones` lee `alerta.*` y `aviso.*` de `visitas.eventos`; `reportes` lee `usuario.*`, `cuenta.*` de `seguridad.eventos` y `visita.*`, `hallazgo.*` de `visitas.eventos`; `seguridad` lee `auditoria.*` de ambos. Una clave nueva se pide a la integradora.
+- **Retención**: el registro **y** el contenido de cada correo se guardan 1 año, con los secretos (códigos, enlaces) enmascarados en lo guardado (ADR-004). El rol de la app no borra ese registro: purga por función `SECURITY DEFINER` (patrón de `seguridad`, V4).
+- **Abierto para su plan**: el **teléfono** para el SMS de alertas críticas no viaja en `usuario.*` (minimización); proponer cómo obtenerlo (p. ej. un `/interno` de seguridad con alcance propio) y pedirlo por la integradora.
+- Correo local: el Mailpit ya instalado, destinatarios ficticios `@reportes.prueba.local`.
+
 ## Flyway (ADR-005)
 
 - **VISITAS A: V1–V199. VISITAS B: V200–V399.** Nadie usa números del otro rango.
@@ -43,6 +62,12 @@ Leer junto con `docs/decisiones/` (ADR-001..014) y `librerias/comun/README.md`. 
 - Correos y alertas: **nunca se envían desde `visitas`**; se publican eventos para `notificaciones` (oleada 2, sesión reportes).
 - Frontend: las pantallas van en `frontend/src/app/paginas/visitas/` según `frontend/README.md` («Agregar pantallas»), con el design system de `ui/` y el registro de rutas `rutas-modulos.ts` (cada sesión edita solo su bloque).
 - Puertos: los de su desfase en `infra/.env` (ya generado; no regenerarlo).
+
+## Datos personales en logs (regla común, 2026-11-06; aplica a todas las sesiones)
+
+- Los **modelos generados desde `contratos/`** (`*.api.modelo.*`) y los cuerpos de petición o respuesta **nunca** se escriben en logs, en mensajes de excepción ni en la bitácora: su `toString()` generado imprime todos los campos, incluidos documento, correo, teléfono y nombre. Para trazar, se usan identificadores (`uid`, `id` de visita, `fila`).
+- Lo mismo para los registros propios con datos personales: su `toString()` omite documento, correo y teléfono (como `UsuarioCopia` y `Foto` de comun).
+- La revisión de seguridad de cada entrega lo verifica (búsqueda de `log.*(` con modelos o cuerpos).
 
 ## Entregas
 

@@ -109,23 +109,20 @@ class PermisosRabbitTest extends PruebaEventosBase {
     }
 
     @Test
-    @DisplayName("matriz: gateway NO puede enlazar usuario.creado ni #; sí sesion.* y usuario.estado_cambiado")
+    @DisplayName("matriz: gateway solo enlaza sesion.*; nunca usuario.* (la foto trae documento y correo; Ley 1581, ADR-006)")
     void gatewayNoEnlazaUsuarioCreado() throws Exception {
         String cola = "gateway.prueba-" + UUID.randomUUID().toString().substring(0, 8);
-        assertThat(InfraEventos.codigoDeCierre("gateway", ch -> {
-            ch.queueDeclare(cola, true, false, false, null);
-            ch.queueBind(cola, EXCHANGE, "usuario.creado");
-        })).as("usuario.creado").isEqualTo(ACCESS_REFUSED);
-        assertThat(InfraEventos.codigoDeCierre("gateway", ch -> {
-            ch.queueDeclare(cola, true, false, false, null);
-            ch.queueBind(cola, EXCHANGE, "#");
-        })).as("#").isEqualTo(ACCESS_REFUSED);
+        for (String prohibida : java.util.List.of("usuario.creado", "usuario.estado_cambiado", "usuario.permisos_cambiados", "#")) {
+            assertThat(InfraEventos.codigoDeCierre("gateway", ch -> {
+                ch.queueDeclare(cola, true, false, false, null);
+                ch.queueBind(cola, EXCHANGE, prohibida);
+            })).as(prohibida).isEqualTo(ACCESS_REFUSED);
+        }
         assertThat(InfraEventos.codigoDeCierre("gateway", ch -> {
             ch.queueDeclare(cola, true, false, false, null);
             ch.queueBind(cola, EXCHANGE, "sesion.cerrada");
-            ch.queueBind(cola, EXCHANGE, "usuario.estado_cambiado");
-            ch.queueBind(cola, EXCHANGE, "usuario.permisos_cambiados");
-        })).as("lo permitido").isEqualTo(-1);
+            ch.queueBind(cola, EXCHANGE, "sesion.refrescar");
+        })).as("lo permitido: sesion.*").isEqualTo(-1);
     }
 
     @Test
