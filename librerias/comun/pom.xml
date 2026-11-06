@@ -55,6 +55,18 @@
             <groupId>com.drewnoakes</groupId>
             <artifactId>metadata-extractor</artifactId>
         </dependency>
+        <!-- .doc y .xls (OLE): se rechazan los que traen macros VBA u objetos incrustados (decisión del usuario, 2026-11-06). Versión en el padre. -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi</artifactId>
+            <exclusions>
+                <!-- Convergencia: queda la commons-io 2.22.0 que trae tika-core (POI pide 2.21.0; la API es compatible hacia atrás). -->
+                <exclusion>
+                    <groupId>commons-io</groupId>
+                    <artifactId>commons-io</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

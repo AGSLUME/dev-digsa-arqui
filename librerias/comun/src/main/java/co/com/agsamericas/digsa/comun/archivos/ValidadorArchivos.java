@@ -36,6 +36,22 @@ public class ValidadorArchivos {
             Map.entry("video/mp4", "mp4"), Map.entry("video/quicktime", "mov"), Map.entry("video/webm", "webm"), Map.entry("video/3gpp", "3gp"),
             Map.entry("text/plain", "txt"), Map.entry("text/markdown", "md"));
 
+    /** Extensión → Content-Type de lo que se admite: la lista cerrada para las descargas (seguridad: nunca el tipo que diga quien sube). */
+    private static final Map<String, String> ADMITIDOS;
+
+    static {
+        Map<String, String> m = new java.util.LinkedHashMap<>();
+        TIPOS.forEach((tipo, extension) -> m.putIfAbsent(extension, tipo));
+        ADMITIDOS = java.util.Collections.unmodifiableMap(m);
+    }
+
+    /**
+     * Lista cerrada extensión → Content-Type para servir un archivo guardado (integradora, VA2.T): las descargas de visitas-a y visitas-b
+     * toman el tipo de aquí, por la extensión con que se guardó, con {@code nosniff} y {@code Content-Disposition: attachment}.
+     */
+    public static Map<String, String> tiposAdmitidos() {
+        return ADMITIDOS;
+    }
     /** Archivo validado, listo para guardar. */
     public record Valido(byte[] contenido, String tipo, String extension, String sha256) {
     }
@@ -77,7 +93,8 @@ public class ValidadorArchivos {
             }
             case "application/x-tika-msoffice" -> {
                 String t = tika.detect(contenido, n);
-                yield "application/msword".equals(t) || "application/vnd.ms-excel".equals(t) ? t : porBytes;
+                // Word o Excel reconocidos y sin macros VBA ni objetos incrustados (decisión del usuario, también para el formato viejo)
+                yield ("application/msword".equals(t) || "application/vnd.ms-excel".equals(t)) && estructuraOle(contenido) ? t : porBytes;
             }
             case "text/plain" -> n.toLowerCase(java.util.Locale.ROOT).endsWith(".md") ? "text/markdown" : porBytes;
             default -> porBytes;
@@ -168,6 +185,32 @@ public class ValidadorArchivos {
         return tipos && partes;
     }
 
+    /** Entradas de un OLE (.doc, .xls) que delatan macros VBA u objetos incrustados; se comparan sin distinguir mayúsculas. */
+    static final java.util.Set<String> ENTRADAS_OLE_PROHIBIDAS = java.util.Set.of("_vba_project_cur", "_vba_project", "macros", "vba", "objectpool");
+
+    /**
+     * ¿El OLE está libre de macros VBA y objetos incrustados? Recorre los directorios con Apache POI (el tamaño ya se revisó antes). Lo que no
+     * se pueda leer no lo está.
+     */
+    static boolean estructuraOle(byte[] ole) {
+        try (org.apache.poi.poifs.filesystem.POIFSFileSystem fs = new org.apache.poi.poifs.filesystem.POIFSFileSystem(new ByteArrayInputStream(ole))) {
+            return sinProhibidas(fs.getRoot());
+        } catch (IOException | RuntimeException e) {
+            return false;
+        }
+    }
+
+    private static boolean sinProhibidas(org.apache.poi.poifs.filesystem.DirectoryEntry dir) {
+        for (org.apache.poi.poifs.filesystem.Entry e : dir) {
+            if (ENTRADAS_OLE_PROHIBIDAS.contains(e.getName().toLowerCase(java.util.Locale.ROOT))) {
+                return false;
+            }
+            if (e instanceof org.apache.poi.poifs.filesystem.DirectoryEntry sub && !sinProhibidas(sub)) {
+                return false;
+            }
+        }
+        return true;
+    }
     /**
      * Más píxeles que esto no se decodifican para enderezar: una foto de 16 MP ocupa unos 64 MB al decodificarla y otro tanto la girada
      * (revisión Java M3; el monolito admitía 40 MP). Además, como máximo {@link #ENDEREZANDO} fotos a la vez.

@@ -237,11 +237,21 @@ public class RepositorioVisitas {
         }
     }
 
+    /** Texto para un integrante que la copia de usuarios todavía no tiene (los eventos de seguridad van atrasados). */
+    public static final String NO_SINCRONIZADO = "Usuario no sincronizado";
+
+    /**
+     * El equipo de la visita. La membresía sale SOLO de {@code visitas_auditores}; los datos de la persona, de la copia con un LEFT JOIN
+     * (hallazgo ALTO de VISITAS B): un integrante que aún no está en la copia sigue en el equipo, con {@link #NO_SINCRONIZADO}, sin
+     * correo ni documento, y activo (la copia atrasada no lo vuelve inactivo). Las asignaciones nuevas sí exigen verlo en la copia
+     * ({@link #auditoresActivos}).
+     */
     public List<Miembro> equipo(long visitaId) {
         return jdbc.sql("""
-                SELECT u.uid, u.nombre, u.usuario, u.correo, u.documento, coalesce(a.rol, 'otro') AS rol, va.funcion, va.orden, u.activo
-                FROM visitas_auditores va JOIN usuarios_copia u ON u.uid = va.usuario_id LEFT JOIN auditores a ON a.usuario_id = u.uid
-                WHERE va.visita_id = :id ORDER BY va.orden""").param("id", visitaId)
+                SELECT va.usuario_id, coalesce(u.nombre, :sin), u.usuario, u.correo, u.documento, coalesce(a.rol, 'otro') AS rol, va.funcion,
+                       va.orden, coalesce(u.activo, true)
+                FROM visitas_auditores va LEFT JOIN usuarios_copia u ON u.uid = va.usuario_id LEFT JOIN auditores a ON a.usuario_id = va.usuario_id
+                WHERE va.visita_id = :id ORDER BY va.orden""").param("id", visitaId).param("sin", NO_SINCRONIZADO)
                 .query((rs, n) -> new Miembro(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
                         rs.getString(7), rs.getInt(8), rs.getBoolean(9))).list();
     }

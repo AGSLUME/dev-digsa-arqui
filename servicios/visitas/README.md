@@ -68,6 +68,18 @@ Archivos: `Almacen` y `ValidadorArchivos` de `librerias/comun` (carpeta `lume.ar
   `visitas.usuarios`); se declaran la cola y el binding, nada más. Usuario del broker: `VISITAS_RABBIT_USUARIO` / `VISITAS_RABBIT_CLAVE`.
 - Topología y consumo con `Topologia` y `ConsumoEventos` de `librerias/comun` (unidad S2-OUTBOX de seguridad). En las pruebas, el RabbitMQ
   de Testcontainers monta `infra/rabbitmq/usuarios.sh` y se usa el usuario del servicio, no el administrador.
+- **Outbox activo (VA2.O):** `V11__outbox.sql` crea `outbox` (con el trigger que impide borrar un evento sin publicar) y ajusta
+  `mensajes_procesados`. Para publicar: `PublicadorEventos.publicar(tipo, agregado, version, datos)` **dentro de la transacción** del
+  cambio; sin transacción lanza `IllegalStateException`. `application.yml` ya trae `lume.eventos.origen: visitas`, el usuario
+  `VISITAS_RABBIT_USUARIO`/`VISITAS_RABBIT_CLAVE` y `publisher-confirm-type: simple`. En pruebas el despachador está apagado
+  (`lume.eventos.cada-ms: 0`): se llama `DespachadorOutbox.despachar()` a mano (ver `compartido/OutboxVisitasTest`).
+- `soporte/ContenedoresPrueba` levanta PostgreSQL y RabbitMQ (mismo `command`, `usuarios.sh`, `10-lume.conf` y `definiciones.json` del
+  compose); la aplicación se conecta como `visitas`. Para leer lo publicado en una prueba, la cola temporal la declara el administrador
+  (`ContenedoresPrueba.ADMIN_USUARIO`), porque `visitas` no puede enlazar «#».
+- **Al integrar el comun del cierre de S2:** la cola `visitas.sin-ruta` cambia de argumentos (TTL de 7 días). En local hay que borrarla una
+  vez, **solo la cola** (consola de RabbitMQ o `rabbitmqctl delete_queue visitas.sin-ruta` en el contenedor); el servicio la vuelve a crear.
+- **Compilar sin `mvn install`:** `~/.m2` lo comparten todas las sesiones; instalar `lume-comun` desde una rama pisa el de las demás. Usar
+  `-pl servicios/visitas -am` (el reactor resuelve comun y reglas de la propia rama).
 
 ## Pruebas
 

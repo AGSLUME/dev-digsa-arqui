@@ -48,8 +48,22 @@ spring:
           jwk-set-uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}/oauth2/jwks
           # Audiencia por destinatario: visitas solo acepta tokens dirigidos a él.
           audiences: visitas
+  rabbitmq:
+    # Un usuario de RabbitMQ por servicio, con escritura solo en visitas.eventos (ADR-006). La clave viene del .env o de Vault.
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PUERTO:5672}
+    username: ${VISITAS_RABBIT_USUARIO:visitas}
+    password: ${VISITAS_RABBIT_CLAVE:}
+    # El despachador del outbox espera la confirmación del broker antes de marcar un evento como publicado (obligatorio en comun).
+    publisher-confirm-type: simple
+    # Un broker que no responde no retiene al despachador 60 s por intento.
+    connection-timeout: 5s
 
 lume:
+  # Eventos (ADR-006): outbox de comun hacia el exchange visitas.eventos (topic, durable, alternate-exchange visitas.sin-ruta; lo
+  # declara comun con esos mismos argumentos que infra/rabbitmq/definiciones.json). Contrato: contratos/eventos/visitas.yaml.
+  eventos:
+    origen: visitas
   archivos:
     # Volumen del servicio (ADR-005). Sin valor por omisión fuera de local y prueba: si falta, el servicio no arranca (revisión Java M2).
     carpeta: ${LUME_ARCHIVOS_VISITAS}
@@ -63,5 +77,9 @@ management:
     health:
       probes:
         enabled: true
+  health:
+    rabbit:
+      # El outbox existe para sobrevivir a un broker caído: RabbitMQ no tumba la salud del servicio (sus colas se vigilan en Grafana).
+      enabled: false
 
 # Logs JSON (ADR-009): fuera de las pruebas se activan con LOGGING_STRUCTURED_FORMAT_CONSOLE=logstash (infra/.env).
