@@ -277,8 +277,8 @@ class EsquemaTest extends PruebaIntegracion {
         assertThat(tipoColumna("mensajes_procesados", "id")).isEqualTo("uuid");
         assertThat(clavePrimaria("mensajes_procesados")).containsExactly("id");
         UUID id = UUID.randomUUID();
-        jdbc.sql("INSERT INTO mensajes_procesados (id, tipo) VALUES (:i, 'usuario.actualizado')").param("i", id).update();
-        assertThatThrownBy(() -> jdbc.sql("INSERT INTO mensajes_procesados (id, tipo) VALUES (:i, 'usuario.actualizado')").param("i", id).update())
+        jdbc.sql("INSERT INTO mensajes_procesados (id, procesado) VALUES (:i, now())").param("i", id).update();
+        assertThatThrownBy(() -> jdbc.sql("INSERT INTO mensajes_procesados (id, procesado) VALUES (:i, now())").param("i", id).update())
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 

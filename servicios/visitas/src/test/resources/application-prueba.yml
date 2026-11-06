@@ -2,3 +2,6 @@
 lume:
   archivos:
     carpeta: ${java.io.tmpdir}/lume-pruebas/visitas/archivos
+  eventos:
+    # Sin ciclo automático: las pruebas llaman a DespachadorOutbox.despachar() cuando lo necesitan.
+    cada-ms: 0
