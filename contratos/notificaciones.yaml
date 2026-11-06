@@ -1,0 +1,1080 @@
+openapi: 3.1.0
+info:
+  title: LUME · notificaciones
+  version: 0.1.0
+  description: |
+    Servicio `notificaciones` (ADR-002). Absorbe del monolito `correos`, `alertas`, y la bandeja de salida, el correo y el SMS de
+    `plataforma`. Paridad con `digsa-java` @ 1ff82de. Los textos entre «» son los del monolito, sin cambios.
+
+    **Quién llama.**
+    - Pantallas Correos y Alertas por el gateway: `/api/**`, token de persona.
+    - Los demás servicios por red interna: `/interno/**`, token de máquina con `aud=notificaciones` y el alcance de cada operación.
+
+    **Envío directo o por la bandeja.**
+    - El monolito tenía dos caminos: la bandeja de salida (encolado, con reintentos) y el envío directo (`EnvioRegistrado`).
+    - En el envío directo, quien llama espera el resultado. El registro queda con `directo=true` y no se reintenta desde la bitácora:
+      se reenvía desde la pantalla de origen.
+    - `/interno/envios` ofrece los dos con `modo`.
+    - Los hechos que publica `visitas` (`aviso.*`) entran siempre por la bandeja y su resultado sale como evento `envio.resultado`
+      (`contratos/eventos/notificaciones.yaml`).
+
+    **Plantillas.**
+    - Viven aquí y el administrador las edita (pestaña Plantillas).
+    - Quien llama manda la `plantilla` y sus `variables`, nunca el HTML del correo. Si mandara el HTML, editar la plantilla no tendría
+      efecto.
+    - Los `bloques` (tablas o listas que arma el servicio de origen) se validan con la misma lista blanca de etiquetas del editor.
+
+    **Secretos.**
+    - El código MFA, el enlace de contraseña, el código del OPL y el enlace del OPL solo viajan en `/interno/envios/secreto`.
+    - Se guardan enmascarados (`••••••`, `[enlace oculto]`) en el registro, que dura 1 año con su contenido (ADR-004 y ADR-005).
+    - Nunca se escriben en logs ni en mensajes de error.
+
+    **Retención.** El registro y el contenido de cada envío se conservan 365 días (`bandeja_retencion_dias`) y luego se purgan. Lo
+    pendiente o en envío nunca se purga.
+
+    **Lo que se queda en el monolito (ADR-008 §5).** La bandeja, las alertas y la bitácora de presupuesto y analítica:
+    - plantillas `reporte_presupuesto` y `presupuesto_notificacion`;
+    - alertas `presupuesto_umbral`, `presupuesto_desviacion` y `analitica_alerta_alta`.
+
+    Esta API no las muestra.
+servers:
+  - url: /
+tags:
+  - name: correos
+    description: Bitácora de envíos (pantalla Correos › Envíos). Solo ADMINISTRADOR.
+  - name: plantillas
+    description: Textos de los correos (pantalla Correos › Plantillas). Solo ADMINISTRADOR.
+  - name: destinatarios
+    description: A quién le llega cada correo (pantalla Correos › Destinatarios). Solo ADMINISTRADOR.
+  - name: alertas
+    description: Catálogo (ADMINISTRADOR) y eventos de alerta (ADMINISTRADOR y COORDINADOR).
+  - name: interno
+    description: Solo red interna, token de máquina.
+security:
+  - sesionGateway: []
+paths:
+  /api/correos/opciones:
+    get:
+      tags: [correos]
+      operationId: opcionesCorreos
+      summary: Tipos y estados para los filtros
+      description: |
+        Los tipos son los conocidos (`TiposCorreo`) más los orígenes que ya aparecen en la bitácora (p. ej. cada `alerta:<tipo>`),
+        ordenados por nombre.
+      responses:
+        '200':
+          description: Opciones.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpcionesCorreos'
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+  /api/correos/envios:
+    get:
+      tags: [correos]
+      operationId: listarEnvios
+      summary: Bitácora de envíos, paginada por llave (100 por página)
+      description: |
+        - Orden: `creado DESC, id DESC`.
+        - La página siguiente se pide con `despuesFecha` y `despuesId`, tomados de `siguiente`.
+        - Los destinatarios van enmascarados (Ley 1581): hasta tres y «y N más».
+        - La descarga en Excel o CSV es el reporte `correos_envios` de `reportes`, con los mismos filtros.
+      parameters:
+        - { name: desde, in: query, required: false, description: 'Primer día, `yyyy-MM-dd` (Bogotá). Sin él, hoy menos 7 días. Si queda después de `hasta`, se intercambian.', schema: { type: string } }
+        - { name: hasta, in: query, required: false, description: 'Último día, `yyyy-MM-dd` (Bogotá). Sin él, hoy.', schema: { type: string } }
+        - { name: tipo, in: query, required: false, description: 'Uno o varios orígenes (`^[a-z0-9_:.-]{1,60}$`).', schema: { type: array, items: { type: string } }, explode: true }
+        - { name: estado, in: query, required: false, schema: { type: array, items: { $ref: '#/components/schemas/EstadoEnvio' } }, explode: true }
+        - { name: destinatario, in: query, required: false, description: 'Correo completo; búsqueda exacta en `para` y `copia`.', schema: { type: string, maxLength: 150 } }
+        - { name: despuesFecha, in: query, required: false, description: '`siguiente.fecha` de la página anterior (ISO-8601 con zona).', schema: { type: string } }
+        - { name: despuesId, in: query, required: false, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: Página de envíos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaEnvios'
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '422':
+          description: |
+            - «La página pedida no es válida.»
+            - «El tipo de correo no es válido.»
+            - «El estado no es válido: use pendiente, enviando, enviado, parcial, fallido.»
+            - «Escriba el correo completo del destinatario (la búsqueda es exacta).» (`campo` = `destinatario`)
+          content:
+            application/problem+json:
+              schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+  /api/correos/envios/{id}:
+    get:
+      tags: [correos]
+      operationId: verEnvio
+      summary: Vista previa de un envío
+      description: |
+        Devuelve el correo como se guardó, con los secretos ocultos, y los destinatarios completos. Esta consulta queda en la auditoría
+        (`correo_destinatarios_vistos`). De los adjuntos solo se dan nombre, tipo y tamaño, nunca la ruta.
+      parameters:
+        - $ref: '#/components/parameters/IdEnvio'
+      responses:
+        '200':
+          description: Envío con su contenido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvioDetalle'
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404':
+          description: "«El envío no existe o ya se purgó.»"
+          content:
+            application/problem+json:
+              schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+  /api/correos/envios/{id}/reintento:
+    post:
+      tags: [correos]
+      operationId: reintentarEnvio
+      summary: Reintentar un envío fallido
+      description: |
+        Crea un envío nuevo en la bandeja con `reintentoDe` = `id`. Solo se puede reintentar un envío fallido, reintentable, que no sea
+        directo y que no se haya reintentado ya. Queda en la auditoría (`correo_reintentado`).
+      parameters:
+        - $ref: '#/components/parameters/IdEnvio'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Motivo'
+      responses:
+        '200':
+          description: "«El correo quedó en la bandeja de salida como envío N.º {id}.»"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdMensaje'
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404':
+          description: "«El envío no existe o ya se purgó.»"
+          content:
+            application/problem+json:
+              schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+        '409':
+          description: |
+            - El motivo de no reintento guardado en el envío o, si no lo hay, «Este envío no se reintenta desde la bitácora.»
+            - «Solo se reintentan los envíos fallidos.»
+            - «Ya se reintentó como envío N.º {id}.»
+            - «El envío ya se reintentó o cambió de estado. Actualice la lista.» (carrera)
+          content:
+            application/problem+json:
+              schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+        '419': { $ref: '#/components/responses/PaginaExpirada' }
+        '422':
+          description: "«Escriba el motivo del reintento (entre 10 y 300 caracteres).» (`campo` = `motivo`)"
+          content:
+            application/problem+json:
+              schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+  /api/correos/plantillas:
+    get:
+      tags: [plantillas]
+      operationId: listarPlantillas
+      summary: Plantillas de correo
+      responses:
+        '200':
+          description: Todas las plantillas (23), con su estado de edición.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PlantillaResumen' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+  /api/correos/plantillas/{clave}:
+    get:
+      tags: [plantillas]
+      operationId: verPlantilla
+      summary: Detalle de una plantilla, con sus variables y sus últimos 20 cambios
+      parameters:
+        - $ref: '#/components/parameters/ClavePlantilla'
+      responses:
+        '200':
+          description: Plantilla.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlantillaDetalle'
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404': { $ref: '#/components/responses/PlantillaNoExiste' }
+    put:
+      tags: [plantillas]
+      operationId: editarPlantilla
+      summary: Guardar un texto nuevo (con motivo)
+      description: Agrega una versión; nunca reescribe las anteriores. Queda en la auditoría (`correo_plantilla_editada`).
+      parameters:
+        - $ref: '#/components/parameters/ClavePlantilla'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EdicionPlantilla'
+      responses:
+        '200':
+          description: "«Plantilla guardada: los próximos correos «{nombre}» salen con este texto.»"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdMensaje' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404': { $ref: '#/components/responses/PlantillaNoExiste' }
+        '409': { $ref: '#/components/responses/PlantillaNoEditable' }
+        '419': { $ref: '#/components/responses/PaginaExpirada' }
+        '422':
+          description: |
+            - «Escriba el motivo (entre 10 y 300 caracteres).» (`campo` = `motivo`)
+            - Errores de validación del texto, unidos con un espacio (`campo` = `asunto` si el primero habla del asunto; si no, `cuerpo`):
+              - «Escriba el asunto.»
+              - «El asunto tiene máximo 200 caracteres.»
+              - «El asunto va en una sola línea.»
+              - «Escriba el texto del correo.»
+              - «El texto tiene máximo 10.000 caracteres.»
+              - «Estas variables no existen en esta plantilla: {{x}}, ….»
+              - «Faltan variables protegidas (no se pueden quitar): {{x}}, ….»
+              - «Un bloque no puede ir en el asunto.»
+              - «La etiqueta <x> no se admite en el correo.»
+              - «El estilo «…» no se admite (solo colores, tamaños y bordes).»
+              - «El atributo x lleva un número.»
+              - «El atributo x no se admite en el correo.»
+              - «Los enlaces solo pueden apuntar a una variable de la plantilla (por ejemplo {{enlace}}).»
+              - «Hay un «<» suelto o una etiqueta mal escrita: escriba &lt; si quiere mostrar el signo.»
+              - «Escriba el signo & como &amp;.»
+            - «No hay cambios que guardar.» (`campo` = `cuerpo`)
+          content:
+            application/problem+json:
+              schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+  /api/correos/plantillas/{clave}/vista-previa:
+    post:
+      tags: [plantillas]
+      operationId: vistaPreviaPlantilla
+      summary: Vista previa con datos ficticios (no guarda)
+      description: |
+        - Con `asunto` y `cuerpo`, valida ese texto. Si no tiene errores, lo muestra; si los tiene, muestra el texto vigente junto con
+          los errores.
+        - Sin cuerpo de petición (o en una plantilla no editable), muestra el texto vigente.
+      parameters:
+        - $ref: '#/components/parameters/ClavePlantilla'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TextoPlantilla'
+      responses:
+        '200':
+          description: Correo de ejemplo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VistaPrevia'
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404': { $ref: '#/components/responses/PlantillaNoExiste' }
+        '419': { $ref: '#/components/responses/PaginaExpirada' }
+  /api/correos/plantillas/{clave}/restaurar:
+    post:
+      tags: [plantillas]
+      operationId: restaurarPlantilla
+      summary: Volver al texto original (con motivo)
+      description: Queda en la auditoría (`correo_plantilla_restaurada`).
+      parameters:
+        - $ref: '#/components/parameters/ClavePlantilla'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Motivo'
+      responses:
+        '200':
+          description: "«Plantilla restaurada: los próximos correos «{nombre}» salen con el texto original.»"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdMensaje' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404': { $ref: '#/components/responses/PlantillaNoExiste' }
+        '409':
+          description: |
+            - «La plantilla «{nombre}» no se edita. Lleva un código o un enlace de un solo uso: se ve aquí pero no se edita.»
+            - «La plantilla ya tiene el texto original.»
+          content:
+            application/problem+json:
+              schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+        '419': { $ref: '#/components/responses/PaginaExpirada' }
+        '422':
+          description: "«Escriba el motivo (entre 10 y 300 caracteres).» (`campo` = `motivo`)"
+          content:
+            application/problem+json:
+              schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+  /api/correos/destinatarios:
+    get:
+      tags: [destinatarios]
+      operationId: verDestinatarios
+      summary: A quién le llega cada correo
+      description: |
+        - Las 13 reglas son fijas.
+        - El buzón de la DIGSA (`correo_digsa`), los buzones de cada fuerza y el correo del OPL son de Catálogos (`visitas`).
+          `notificaciones` los lee por `GET /interno/catalogos/buzones` de visitas (alcance `visitas:buzones`).
+        - La consulta queda en la auditoría (`correo_destinatarios_vistos`), porque muestra buzones completos.
+      responses:
+        '200':
+          description: Reglas, buzones y resumen de alertas.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destinatarios'
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '503': { $ref: '#/components/responses/CatalogosNoDisponible' }
+  /api/correos/destinatarios/digsa:
+    put:
+      tags: [destinatarios]
+      operationId: editarBuzonDigsa
+      summary: Editar el buzón de la DIGSA (con motivo)
+      description: Lo guarda Catálogos (`PUT /interno/catalogos/buzones/digsa` de visitas). Se permite una lista vacía.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Buzones'
+      responses:
+        '200':
+          description: "«Buzón de la DIGSA guardado: N correo(s).»"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mensaje, correos]
+                properties:
+                  mensaje: { type: string }
+                  correos: { type: array, items: { type: string } }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '419': { $ref: '#/components/responses/PaginaExpirada' }
+        '422': { $ref: '#/components/responses/ValidacionBuzones' }
+        '503': { $ref: '#/components/responses/CatalogosNoDisponible' }
+  /api/correos/destinatarios/fuerzas/{codigo}:
+    put:
+      tags: [destinatarios]
+      operationId: editarBuzonesFuerza
+      summary: Editar los buzones de Sanidad de una fuerza (con motivo)
+      description: Catálogos conserva el nombre, la sanidad y el estado de la fuerza; solo cambian los correos.
+      parameters:
+        - { name: codigo, in: path, required: true, schema: { type: string, maxLength: 10 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Buzones'
+      responses:
+        '200':
+          description: "«Buzones de {nombre} guardados: N correo(s).»"
+          content:
+            application/json:
+              schema: { $ref: './comun.yaml#/components/schemas/Mensaje' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404':
+          description: "«La fuerza no existe.»"
+          content:
+            application/problem+json:
+              schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+        '419': { $ref: '#/components/responses/PaginaExpirada' }
+        '422': { $ref: '#/components/responses/ValidacionBuzones' }
+        '503': { $ref: '#/components/responses/CatalogosNoDisponible' }
+  /api/alertas/catalogo:
+    get:
+      tags: [alertas]
+      operationId: catalogoAlertas
+      summary: Catálogo de alertas (solo ADMINISTRADOR)
+      description: |
+        `sinTelefono` cuenta los destinatarios sin móvil válido. El dato sale de `POST /interno/usuarios/moviles` de seguridad, sin
+        mostrar los números.
+      responses:
+        '200':
+          description: Tipos, perfiles admitidos y usuarios elegibles (hasta 500).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogoAlertas'
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+    put:
+      tags: [alertas]
+      operationId: guardarAlerta
+      summary: Editar un tipo de alerta (solo ADMINISTRADOR)
+      description: Lo que llega en null se conserva. Queda en la auditoría (`alerta_catalogo_editado`) con los cambios.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EdicionAlerta'
+      responses:
+        '200':
+          description: |
+            «Alerta actualizada: N destinatario(s) activos.». Si la alerta va por SMS y hay destinatarios sin móvil, se agrega
+            « N no tienen un móvil válido y solo recibirán el correo.»
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mensaje, destinatarios, sinTelefono]
+                properties:
+                  mensaje: { type: string }
+                  destinatarios: { type: integer }
+                  sinTelefono: { type: integer }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404':
+          description: "«El tipo de alerta no existe.»"
+          content:
+            application/problem+json:
+              schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+        '419': { $ref: '#/components/responses/PaginaExpirada' }
+        '422':
+          description: |
+            - «El nombre de la alerta debe tener de 3 a 80 caracteres.»
+            - «Las alertas operativas van solo por correo: el SMS es para las críticas.»
+            - «Perfil no válido para recibir alertas: «X». Se admiten: ADMINISTRADOR, COORDINADOR, DIGSA, ANALISTA, AUDITOR, SANIDAD.»
+            - «Máximo 50 usuarios por alerta: use los perfiles.»
+            - «Algún usuario elegido no existe o está inactivo.»
+            - «Algún usuario elegido no tiene un perfil interno que pueda recibir alertas (…).»
+            - «Una alerta activa necesita al menos un destinatario (perfil o usuario).»
+          content:
+            application/problem+json:
+              schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+  /api/alertas/eventos:
+    get:
+      tags: [alertas]
+      operationId: eventosAlertas
+      summary: Eventos de alerta y estado de la bandeja en las últimas 24 h (ADMINISTRADOR y COORDINADOR)
+      parameters:
+        - { name: abiertas, in: query, required: false, schema: { type: boolean, default: false } }
+        - { name: limite, in: query, required: false, description: 'Se acota a 1..500.', schema: { type: integer, default: 100 } }
+      responses:
+        '200':
+          description: Eventos con lo que salió y su latencia; bandeja de correo y de SMS.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventosAlertas'
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+  /api/alertas/eventos/{id}/cerrar:
+    post:
+      tags: [alertas]
+      operationId: cerrarAlerta
+      summary: Cerrar una alerta abierta (ADMINISTRADOR y COORDINADOR)
+      description: Queda en la auditoría (`alerta_cerrada`). Si el problema vuelve a ocurrir, se abre una alerta nueva y se avisa de nuevo.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: "«Alerta cerrada.»"
+          content:
+            application/json:
+              schema: { $ref: './comun.yaml#/components/schemas/Mensaje' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '419': { $ref: '#/components/responses/PaginaExpirada' }
+        '422':
+          description: "«La alerta no existe o ya está cerrada.»"
+          content:
+            application/problem+json:
+              schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+  /interno/envios:
+    post:
+      tags: [interno]
+      operationId: enviarInterno
+      summary: Enviar un correo con una plantilla (directo o por la bandeja)
+      description: |
+        **Solo red interna.** Token de máquina con el alcance `notificaciones:enviar`.
+
+        **Modo `directo`** (paridad con `EnvioRegistrado`):
+        - Se registra, se envía y se responde con el resultado.
+        - El registro queda con `directo=true` y `reintentable=false`. El motivo de no reintento es `motivoNoReintentable` o, si no
+          llega, «Envío directo: se reenvía desde su pantalla de origen.».
+        - Los adjuntos (multipart) se envían, pero solo se guardan su nombre, tipo y tamaño.
+        - Quien llama no debe reintentar a ciegas tras un tiempo de espera: con la misma `Idempotency-Key` recibe el resultado del
+          primer intento sin que se envíe dos veces.
+
+        **Modo `bandeja`:**
+        - Se encola y se responde 202.
+        - El despachador reintenta a 1 min, 5 min, 30 min y 2 h, hasta 5 intentos. Los `critico` salen primero.
+        - Si se agota y era crítico, se dispara la alerta `correo_agotado`.
+        - No admite adjuntos: los adjuntos de un aviso los pide `notificaciones` al servicio de origen en cada intento (`aviso.*`).
+
+        **Regla B5: los secretos solo van a «para»** (integradora, 2026-11-06).
+        - Por este endpoint no viaja ningún secreto. Los secretos van por `/interno/envios/secreto`, que no admite `copia`, o por el
+          `secretoEn` de un `aviso.*` (`contratos/eventos/notificaciones.yaml`).
+        - Allí los de «copia» reciben el mismo correo sin el bloque secreto, en un segundo mensaje SMTP del mismo envío.
+        - Los enlaces de los `bloques` solo pueden apuntar al origen de `LUME_FRONTEND_URL`.
+
+        **Errores.** Un fallo del servidor de correo **no** es un error HTTP: el modo directo responde 200 con `estado` = `fallido` y
+        `error` (sin secretos ni direcciones). Los 4xx son errores de quien llama.
+      security:
+        - maquina: ['notificaciones:enviar']
+      parameters:
+        - $ref: '#/components/parameters/ClaveIdempotencia'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Envio'
+          multipart/form-data:
+            schema:
+              type: object
+              required: [envio]
+              properties:
+                envio:
+                  $ref: '#/components/schemas/Envio'
+                adjuntos:
+                  type: array
+                  description: Solo en modo `directo`. Hasta 10 MB en total; pdf, xlsx, csv o txt.
+                  items: { type: string, format: binary }
+            encoding:
+              envio: { contentType: application/json }
+      responses:
+        '200':
+          description: Modo `directo`, resultado del envío.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResultadoEnvio' }
+        '202':
+          description: Modo `bandeja`, encolado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Encolado' }
+        '401': { $ref: '#/components/responses/SinTokenMaquina' }
+        '403': { $ref: '#/components/responses/SinAlcance' }
+        '409':
+          description: La misma `Idempotency-Key` llegó con otro cuerpo.
+          content:
+            application/problem+json:
+              schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+        '413':
+          description: Los adjuntos pasan de 10 MB.
+          content:
+            application/problem+json:
+              schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+        '422': { $ref: '#/components/responses/EnvioInvalido' }
+  /interno/envios/secreto:
+    post:
+      tags: [interno]
+      operationId: enviarSecretoInterno
+      summary: Enviar un correo con un código o enlace de un solo uso (siempre directo)
+      description: |
+        **Solo red interna.** Token de máquina con el alcance `notificaciones:enviar_secreto`. Lo usan seguridad (`mfa_codigo`,
+        `clave_enlace`) y visitas (`opl_codigo`).
+
+        - Solo admite plantillas que declaran un secreto. Por otra vía, esas plantillas se rechazan con 422.
+        - Cada valor de `secretos` llena su variable en el correo que se entrega. En lo guardado esa variable vale `••••••` (código) o
+          `[enlace oculto]` (enlace).
+        - El registro queda con `enmascarado=true`, `reintentable=false` y el motivo «Lleva un código o enlace de un solo uso: el usuario
+          debe pedir uno nuevo.».
+        - Los secretos nunca se escriben en logs, métricas, trazas ni mensajes de error.
+      security:
+        - maquina: ['notificaciones:enviar_secreto']
+      parameters:
+        - $ref: '#/components/parameters/ClaveIdempotencia'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnvioSecreto'
+      responses:
+        '200':
+          description: Resultado del envío.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResultadoEnvio' }
+        '401': { $ref: '#/components/responses/SinTokenMaquina' }
+        '403': { $ref: '#/components/responses/SinAlcance' }
+        '409':
+          description: La misma `Idempotency-Key` llegó con otro cuerpo.
+          content:
+            application/problem+json:
+              schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+        '422': { $ref: '#/components/responses/EnvioInvalido' }
+components:
+  securitySchemes:
+    sesionGateway:
+      $ref: './comun.yaml#/components/securitySchemes/sesionGateway'
+    maquina:
+      type: oauth2
+      description: Token de máquina (client_credentials) emitido por `seguridad`, con `aud=notificaciones`.
+      flows:
+        clientCredentials:
+          tokenUrl: /oauth2/token
+          scopes:
+            'notificaciones:enviar': Enviar un correo con una plantilla, directo o por la bandeja (visitas, reportes, seguridad para los logs).
+            'notificaciones:enviar_secreto': Enviar un correo con un código o enlace de un solo uso (seguridad, visitas).
+            'notificaciones:reportes': Proveedor remoto del reporte `correos_envios` (reportes; `contratos/proveedor-reportes.yaml`).
+  parameters:
+    IdEnvio:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    ClavePlantilla:
+      name: clave
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9_]{1,60}$' }
+    ClaveIdempotencia:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        UUID que elige quien llama. Si llega de nuevo dentro de 24 h con el mismo cuerpo, se devuelve el resultado del primer intento
+        sin enviar otra vez. Si llega con otro cuerpo, 409. Recomendado en todos los envíos y obligatorio si quien llama reintenta.
+      schema: { type: string, format: uuid }
+  responses:
+    NoAutenticado:
+      $ref: './comun.yaml#/components/responses/NoAutenticado'
+    SinPermiso:
+      $ref: './comun.yaml#/components/responses/SinPermiso'
+    PaginaExpirada:
+      $ref: './comun.yaml#/components/responses/PaginaExpirada'
+    SinTokenMaquina:
+      description: Sin token de máquina, o con un token de persona.
+      content:
+        application/problem+json:
+          schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+    SinAlcance:
+      description: El token no tiene el alcance de la operación.
+      content:
+        application/problem+json:
+          schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+    PlantillaNoExiste:
+      description: "«La plantilla no existe.»"
+      content:
+        application/problem+json:
+          schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+    PlantillaNoEditable:
+      description: "«La plantilla «{nombre}» no se edita. Lleva un código o un enlace de un solo uso: se ve aquí pero no se edita.»"
+      content:
+        application/problem+json:
+          schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+    ValidacionBuzones:
+      description: |
+        - «Estos correos no son válidos: a, b.» (`campo` = `correos`)
+        - «Máximo 20 correos.» (`campo` = `correos`)
+        - «Escriba el motivo (entre 10 y 300 caracteres).» (`campo` = `motivo`)
+      content:
+        application/problem+json:
+          schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+    CatalogosNoDisponible:
+      description: |
+        Catálogos (`visitas`) no respondió. Mensaje nuevo, porque el monolito no podía fallar así: «No se pudieron consultar los
+        buzones en Catálogos. Intente en unos minutos.»
+      content:
+        application/problem+json:
+          schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+    EnvioInvalido:
+      description: |
+        Error de quien llama. El `mensaje` nombra el campo, nunca un valor:
+        - plantilla inexistente;
+        - variable desconocida, o variable obligatoria que falta;
+        - bloque con etiquetas fuera de la lista blanca;
+        - plantilla con secreto pedida por `/interno/envios`, o sin secreto pedida por `/interno/envios/secreto`;
+        - destinatario no válido;
+        - más de 100 destinatarios;
+        - `origen` o `referencia` con formato no válido;
+        - adjuntos en modo `bandeja`.
+      content:
+        application/problem+json:
+          schema: { $ref: './comun.yaml#/components/schemas/Problema' }
+  schemas:
+    EstadoEnvio:
+      type: string
+      enum: [pendiente, enviando, enviado, parcial, fallido]
+    OpcionesCorreos:
+      type: object
+      required: [tipos, estados]
+      properties:
+        tipos:
+          type: array
+          items:
+            type: object
+            required: [valor, nombre]
+            properties:
+              valor: { type: string, description: 'Origen, p. ej. `mfa_codigo` o `alerta:correo_agotado`.' }
+              nombre: { type: string, description: 'Nombre visible, p. ej. «Código de verificación (MFA)» o «Alerta · correo_agotado».' }
+        estados:
+          type: array
+          items: { $ref: '#/components/schemas/EstadoEnvio' }
+    EnvioFila:
+      type: object
+      required: [id, creado, creadoLlave, origen, tipo, destinatarios, totalDestinatarios, asunto, estado, intentos, directo, enmascarado]
+      properties:
+        id: { type: integer, format: int64 }
+        creado: { type: string, description: '`yyyy-MM-dd HH:mm:ss`, hora de Bogotá.' }
+        creadoLlave: { type: string, format: date-time, description: 'Instante exacto, para el cursor.' }
+        origen: { type: string }
+        tipo: { type: string, description: 'Nombre visible del origen.' }
+        referencia: { type: [string, 'null'], description: 'Identificador del objeto de origen (p. ej. `acta:15:1`, `reporte:RPT-…`); sin datos personales.' }
+        destinatarios: { type: string, description: 'Hasta tres direcciones enmascaradas y «y N más».' }
+        totalDestinatarios: { type: integer }
+        asunto: { type: string }
+        estado: { $ref: '#/components/schemas/EstadoEnvio' }
+        intentos: { type: integer }
+        error: { type: [string, 'null'], description: 'Último error, sin direcciones (`[correo]`), máximo 500.' }
+        enviado: { type: [string, 'null'], description: '`yyyy-MM-dd HH:mm:ss`, hora de Bogotá.' }
+        directo: { type: boolean, description: 'Envío directo: se reenvía desde su pantalla de origen.' }
+        enmascarado: { type: boolean, description: 'Lleva un código o enlace oculto.' }
+        reintentoDe: { type: [integer, 'null'], format: int64 }
+        motivoReintento: { type: [string, 'null'] }
+        reintentoId: { type: [integer, 'null'], format: int64, description: 'Envío creado al reintentar este.' }
+        noReintentable: { type: [string, 'null'], description: 'Por qué no se puede reintentar, o null si se puede.' }
+    PaginaEnvios:
+      type: object
+      required: [filas, siguiente, desde, hasta]
+      properties:
+        filas: { type: array, items: { $ref: '#/components/schemas/EnvioFila' } }
+        siguiente:
+          type: [object, 'null']
+          required: [fecha, id]
+          properties:
+            fecha: { type: string, format: date-time }
+            id: { type: integer, format: int64 }
+        desde: { type: string, format: date }
+        hasta: { type: string, format: date }
+    EnvioDetalle:
+      allOf:
+        - $ref: '#/components/schemas/EnvioFila'
+        - type: object
+          required: [para, copia, html, adjuntos]
+          properties:
+            para: { type: array, items: { type: string } }
+            copia: { type: array, items: { type: string } }
+            html: { type: string, description: 'Correo de «para» como se guardó; los secretos aparecen como `••••••` o `[enlace oculto]`.' }
+            htmlCopia:
+              type: [string, 'null']
+              description: |
+                Solo en avisos con secreto (regla B5): el correo que recibieron los de «copia», sin el bloque secreto. Es null cuando todos
+                recibieron el mismo correo.
+            estadoCopia:
+              type: [string, 'null']
+              enum: [pendiente, enviando, enviado, parcial, fallido, null]
+              description: 'Con B5, estado del mensaje de «copia» (el `estado` del envío es el de «para»).'
+            adjuntos:
+              type: array
+              items:
+                type: object
+                properties:
+                  nombre: { type: string }
+                  tipo: { type: string }
+                  tamano: { type: integer, format: int64 }
+    Motivo:
+      type: object
+      required: [motivo]
+      properties:
+        motivo: { type: string, minLength: 10, maxLength: 300, description: 'Entre 10 y 300 caracteres (se cuentan sin espacios al inicio y al final).' }
+    IdMensaje:
+      type: object
+      required: [id, mensaje]
+      properties:
+        id: { type: integer, format: int64 }
+        mensaje: { type: string }
+    PlantillaResumen:
+      type: object
+      required: [clave, nombre, modulo, editable, editada]
+      properties:
+        clave: { type: string }
+        nombre: { type: string }
+        modulo: { type: string, description: 'Agenda, Ejecución, Identidad, OPL, Reportes, Auditoría o Alertas.' }
+        editable: { type: boolean }
+        editada: { type: boolean }
+        editadaPor: { type: [string, 'null'] }
+        editadaEl: { type: [string, 'null'] }
+    VariablePlantilla:
+      type: object
+      required: [nombre, descripcion, ejemplo, obligatoria, bloque]
+      properties:
+        nombre: { type: string }
+        descripcion: { type: string }
+        ejemplo: { type: string }
+        obligatoria: { type: boolean, description: 'Protegida, no se puede quitar del texto.' }
+        bloque: { type: boolean, description: 'HTML ya armado por quien envía (tabla o lista).' }
+    PlantillaDetalle:
+      type: object
+      required: [clave, nombre, modulo, formato, editable, titulo, asunto, cuerpo, asuntoFabrica, cuerpoFabrica, editada, variables, historial]
+      properties:
+        clave: { type: string }
+        nombre: { type: string }
+        modulo: { type: string }
+        formato: { type: string, enum: [html, texto, sin_marco] }
+        editable: { type: boolean }
+        motivoNoEditable: { type: [string, 'null'], description: '«Lleva un código o un enlace de un solo uso: se ve aquí pero no se edita.»' }
+        titulo: { type: [string, 'null'] }
+        asunto: { type: string }
+        cuerpo: { type: string }
+        asuntoFabrica: { type: string }
+        cuerpoFabrica: { type: string }
+        editada: { type: boolean }
+        variables: { type: array, items: { $ref: '#/components/schemas/VariablePlantilla' } }
+        historial:
+          type: array
+          description: Últimos 20 cambios (vacío si no es editable).
+          items:
+            type: object
+            properties:
+              id: { type: integer, format: int64 }
+              accion: { type: string, enum: [Editada, Restaurada al original] }
+              motivo: { type: string }
+              usuario: { type: string }
+              creado: { type: string }
+    TextoPlantilla:
+      type: object
+      properties:
+        asunto: { type: string }
+        cuerpo: { type: string }
+    EdicionPlantilla:
+      type: object
+      required: [asunto, cuerpo, motivo]
+      properties:
+        asunto: { type: string, maxLength: 200 }
+        cuerpo: { type: string, maxLength: 10000 }
+        motivo: { type: string, minLength: 10, maxLength: 300 }
+    VistaPrevia:
+      type: object
+      required: [asunto, html, errores]
+      properties:
+        asunto: { type: string }
+        html: { type: string }
+        errores: { type: array, items: { type: string } }
+    Buzones:
+      type: object
+      required: [correos, motivo]
+      properties:
+        correos: { type: array, maxItems: 20, items: { type: string, maxLength: 150 } }
+        motivo: { type: string, minLength: 10, maxLength: 300 }
+    Destinatarios:
+      type: object
+      required: [reglas, digsa, fuerzas, opl, dominiosReportes, alertas]
+      properties:
+        reglas:
+          type: array
+          items:
+            type: object
+            required: [tipo, regla, origen, pantalla, ruta]
+            properties:
+              tipo: { type: string }
+              regla: { type: string }
+              origen: { type: string }
+              pantalla: { type: string }
+              ruta: { type: string }
+        digsa: { type: array, items: { type: string } }
+        fuerzas:
+          type: array
+          items:
+            type: object
+            required: [codigo, nombre, sanidad, correos, activo]
+            properties:
+              codigo: { type: string }
+              nombre: { type: string }
+              sanidad: { type: string }
+              correos: { type: array, items: { type: string } }
+              activo: { type: boolean }
+        opl: { type: array, items: { type: string } }
+        dominiosReportes: { type: array, items: { type: string } }
+        alertas:
+          type: array
+          items:
+            type: object
+            required: [nombre, activa, critica, sms, perfiles, usuarios, destinatarios]
+            properties:
+              nombre: { type: string }
+              activa: { type: boolean }
+              critica: { type: boolean }
+              sms: { type: boolean }
+              perfiles: { type: array, items: { type: string }, description: 'Nombres visibles de los perfiles.' }
+              usuarios: { type: integer, description: 'Cantidad de usuarios elegidos.' }
+              destinatarios: { type: integer }
+    TipoAlerta:
+      type: object
+      required: [tipo, nombre, descripcion, critica, activa, sms, perfiles, usuarios, destinatarios, sinTelefono]
+      properties:
+        tipo: { type: string, pattern: '^[a-z_]{3,40}$' }
+        nombre: { type: string }
+        descripcion: { type: [string, 'null'] }
+        critica: { type: boolean }
+        activa: { type: boolean }
+        sms: { type: boolean }
+        perfiles: { type: array, items: { type: string } }
+        usuarios: { type: array, items: { type: integer, format: int64 } }
+        destinatarios: { type: integer }
+        sinTelefono: { type: integer }
+    CatalogoAlertas:
+      type: object
+      required: [tipos, perfiles, usuarios]
+      properties:
+        tipos: { type: array, items: { $ref: '#/components/schemas/TipoAlerta' } }
+        perfiles: { type: array, items: { type: string }, description: 'ADMINISTRADOR, COORDINADOR, DIGSA, ANALISTA, AUDITOR, SANIDAD.' }
+        usuarios:
+          type: array
+          description: Usuarios activos con algún perfil admitido, por nombre (hasta 500). Salen de la copia `usuario.*`.
+          items:
+            type: object
+            required: [id, nombre, usuario]
+            properties:
+              id: { type: integer, format: int64 }
+              nombre: { type: string }
+              usuario: { type: string }
+    EdicionAlerta:
+      type: object
+      required: [tipo]
+      properties:
+        tipo: { type: string }
+        nombre: { type: [string, 'null'] }
+        activa: { type: [boolean, 'null'] }
+        sms: { type: [boolean, 'null'] }
+        perfiles: { type: [array, 'null'], items: { type: string } }
+        usuarios: { type: [array, 'null'], maxItems: 50, items: { type: integer, format: int64 } }
+    EventoAlerta:
+      type: object
+      description: Las fechas van como `yyyy-MM-dd HH:mm:ss`, hora de Bogotá.
+      properties:
+        id: { type: integer, format: int64 }
+        tipo: { type: string }
+        nombre: { type: string }
+        critica: { type: boolean }
+        clave: { type: string }
+        detalle: { type: [string, 'null'] }
+        abierta: { type: boolean }
+        veces: { type: integer }
+        creado: { type: string }
+        ultimo: { type: [string, 'null'] }
+        ultimoAviso: { type: [string, 'null'] }
+        ultimoSms: { type: [string, 'null'] }
+        cerradaEn: { type: [string, 'null'] }
+        correos: { type: integer }
+        correosEnviados: { type: integer }
+        correosFallidos: { type: integer }
+        latenciaCorreoMs: { type: [integer, 'null'] }
+        smsEnviados: { type: integer }
+        smsPendientes: { type: integer }
+        smsSinEnviar: { type: integer }
+        latenciaSmsMs: { type: [integer, 'null'] }
+    Bandeja24h:
+      type: object
+      properties:
+        pendientes: { type: integer }
+        enviando: { type: integer }
+        fallidos24h: { type: integer }
+        omitidos24h: { type: integer, description: 'Solo en SMS.' }
+        latenciaP50Ms: { type: [integer, 'null'] }
+        latenciaP95Ms: { type: [integer, 'null'] }
+    EventosAlertas:
+      type: object
+      required: [eventos, bandeja24h, bandejaSms24h]
+      properties:
+        eventos: { type: array, items: { $ref: '#/components/schemas/EventoAlerta' } }
+        bandeja24h: { $ref: '#/components/schemas/Bandeja24h' }
+        bandejaSms24h: { $ref: '#/components/schemas/Bandeja24h' }
+    Envio:
+      type: object
+      required: [origen, plantilla, para, modo]
+      properties:
+        origen:
+          type: string
+          pattern: '^[a-z0-9_:.-]{1,60}$'
+          description: 'Tipo de correo en la bitácora (`notificacion_previa`, `opl_aviso`, `reporte_motor`, `reporte_logs`…). El prefijo `alerta:` es interno y se rechaza.'
+        referencia:
+          type: [string, 'null']
+          maxLength: 120
+          description: Identificador del objeto de origen, sin datos personales (`visita:15`, `reporte:RPT-20261106-ABCDEFGH`).
+        plantilla: { type: string, pattern: '^[a-z0-9_]{1,60}$' }
+        variables:
+          type: object
+          additionalProperties: { type: string, maxLength: 2000 }
+          description: Valores de las variables de texto; se escapan al armar el correo.
+        bloques:
+          type: object
+          additionalProperties: { type: string, maxLength: 200000 }
+          description: |
+            Variables `bloque` de la plantilla (tablas o listas en HTML). Se validan con la lista blanca del editor (`p, br, strong, b,
+            em, i, u, ul, ol, li, table, tr, th, td, span`, con `style` restringido). Un bloque fuera de la lista blanca es 422.
+        para:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { type: string, maxLength: 150 }
+        copia:
+          type: array
+          maxItems: 100
+          items: { type: string, maxLength: 150 }
+        modo: { type: string, enum: [directo, bandeja] }
+        critico: { type: boolean, default: false, description: 'Solo en `bandeja`. Sale primero y, si se agota, dispara `correo_agotado`.' }
+        usuarioId:
+          type: [integer, 'null']
+          format: int64
+          description: '`uid` de la persona a la que se refiere el correo, si aplica (para el registro).'
+        motivoNoReintentable:
+          type: [string, 'null']
+          maxLength: 200
+          description: 'Solo en `directo`. Texto que la bitácora muestra en lugar de «Envío directo: se reenvía desde su pantalla de origen.»'
+      additionalProperties: false
+    EnvioSecreto:
+      type: object
+      required: [origen, plantilla, para, secretos]
+      properties:
+        origen: { type: string, enum: [mfa_codigo, clave_enlace, opl_codigo] }
+        referencia: { type: [string, 'null'], maxLength: 120 }
+        plantilla: { type: string, enum: [mfa_codigo, clave_enlace, opl_codigo] }
+        variables:
+          type: object
+          additionalProperties: { type: string, maxLength: 2000 }
+          description: Variables no secretas (nombre, minutos, número de visita…).
+        secretos:
+          type: object
+          minProperties: 1
+          additionalProperties: { type: string, maxLength: 2000 }
+          description: |
+            Variable → valor secreto: `codigo` en `mfa_codigo` y `opl_codigo`, `enlace` en `clave_enlace`. En lo guardado la variable
+            `codigo` vale `••••••` y `enlace` vale `[enlace oculto]`. Cualquier otro nombre es 422.
+        para:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { type: string, maxLength: 150 }
+        usuarioId: { type: [integer, 'null'], format: int64 }
+      additionalProperties: false
+    ResultadoEnvio:
+      type: object
+      required: [id, estado, rechazados]
+      properties:
+        id: { type: integer, format: int64, description: 'Id del envío en la bitácora.' }
+        estado: { type: string, enum: [enviado, parcial, fallido] }
+        rechazados:
+          type: array
+          description: Destinatarios que el servidor de correo rechazó (estado `parcial`). Se devuelven a quien llama, que ya los conocía.
+          items: { type: string }
+        error:
+          type: [string, 'null']
+          description: |
+            Causa legible, sin secretos ni direcciones: «No se pudo conectar con el servidor de correo.», «El servidor de correo rechazó
+            el envío.» o «Algunos destinatarios rechazaron el correo.»
+    Encolado:
+      type: object
+      required: [id]
+      properties:
+        id: { type: integer, format: int64, description: 'Id del primer envío creado (si hay más de 100 destinatarios se parte en varios).' }

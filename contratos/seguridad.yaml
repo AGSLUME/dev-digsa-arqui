@@ -1,0 +1,1817 @@
+openapi: 3.1.0
+info:
+  title: LUME · seguridad
+  version: 0.5.0
+  description: |
+    API del servicio `seguridad` (ADR-002, ADR-004, ADR-014), tal como la ve la SPA **a través del gateway** (mismo origen).
+
+    **Estado:** parcial. Cubre el ingreso (`/api/auth/*`), la sesión (`/api/sesion*`), la cuenta propia
+    (`/api/cuenta/clave`), la salida (`/bff/salir`, del gateway), la administración de usuarios y roles (`/api/usuarios/**`, S2) y los
+    logs (`/api/logs/**`). **`/api/logs` se publica en 0.5.0 antes del código (S3)** para que el frontend avance; hasta entonces el servicio
+    responde 404 en esas rutas.
+
+    **Paridad.** Rutas, cuerpos, códigos HTTP y textos son los del monolito (`digsa-java`: `identidad/ControladorIngreso`,
+    `ControladorSesion`, `ControladorCuenta`, `ServicioIngreso`, `ServicioClaves`, `FiltroSesion`). Diferencias, todas justificadas:
+    1. Los errores son RFC 7807 con `mensaje`, `campo` y `motivo` (ver `comun.yaml`), un superconjunto de `{mensaje, campo?, motivo?}`.
+    2. `POST /api/auth/codigo` agrega `continuar` (ADR-014): la URL a la que la SPA navega para terminar la autorización OIDC.
+    3. `POST /api/auth/salir` ya no existe: la salida es `POST /bff/salir` (gateway), que cierra todo y responde 204.
+    4. El monolito agregaba « (local: <código>)» al mensaje y llenaba `enlaceLocal` en local con correo a archivo. Aquí el correo
+       local va a Mailpit, así que el mensaje nunca lleva el código y `enlaceLocal` siempre es `null`.
+    5. 429 por límite de tasa del gateway en `/api/auth/**`, por IP y por usuario (ADR-003). Es nuevo.
+    6. La consulta del enlace es `POST /api/auth/clave/consultar` con `{tkn}` en el cuerpo (el monolito: `GET /api/auth/clave?tkn=`): el
+       token no queda en registros de acceso.
+
+    **Flujo de ingreso (ADR-014).** Sin sesión, la SPA navega (página completa) a `/bff/oauth2/authorization/lume`. El emisor redirige
+    a `/ingreso` (pantalla Angular), que usa estas rutas. Cuando `POST /api/auth/codigo` responde 200, la SPA hace
+    `window.location.assign(continuar)`.
+
+    **CSRF.** Toda escritura (POST, PUT, DELETE) lleva la cabecera `X-XSRF-TOKEN` con el valor de la cookie `XSRF-TOKEN`. Sin ella el
+    gateway responde 419. `GET /api/auth/inicio` deja la cookie lista.
+
+    **Motivos de 401** (`motivo`; la pantalla de ingreso muestra `mensaje` en la alerta `motivo-cierre`):
+
+    | motivo | mensaje |
+    |---|---|
+    | `sin_sesion` | La sesión expiró. Vuelva a iniciar sesión. |
+    | `inactividad` | La sesión se cerró por inactividad. Vuelva a iniciar sesión. |
+    | `inactivo` | Su usuario está inactivo. |
+    | `clave` | La contraseña cambió. Inicie sesión de nuevo. |
+    | `cerrada` | Su sesión fue cerrada. Vuelva a iniciar sesión. |
+    | `reemplazada` | Su sesión se cerró porque su usuario ingresó desde otro equipo o navegador. Solo se permite una sesión a la vez. |
+    | `clave_vencida` | Su contraseña venció. Ingrese de nuevo para cambiarla. |
+    | `cambio_clave` | Debe actualizar su contraseña. (+ « Le enviamos un enlace a su correo.» si salió) |
+    | `bloqueado` | Su usuario está bloqueado 15 minutos por intentos fallidos. Vuelva a ingresar más tarde. |
+    | `mfa_vencido` | La verificación venció. Ingrese de nuevo con su usuario y contraseña. |
+
+    Un 401 de credenciales en `POST /api/auth/ingreso` no lleva `motivo` y siempre dice: «Usuario o contraseña incorrectos. Después de
+    5 intentos fallidos el usuario se bloquea 15 minutos.»
+servers:
+  - url: /
+    description: El gateway (mismo origen que la SPA).
+tags:
+  - name: ingreso
+    description: Ingreso en dos pasos (usuario + contraseña + captcha → código por correo) y claves sin sesión. Público.
+  - name: sesion
+    description: Datos de la sesión y latido. Requiere sesión.
+  - name: cuenta
+    description: La cuenta propia. Requiere sesión.
+  - name: bff
+    description: Rutas del gateway (BFF). No las implementa `seguridad`.
+  - name: usuarios
+    description: Administración de usuarios, roles adicionales, perfiles y tiempo de inactividad. Pantalla USUARIOS (solo Administrador).
+  - name: logs
+    description: Logs del sistema (Anexo 5, 3, ítem 15). Consulta, descarga y envío por correo. Pantalla LOGS (solo Administrador).
+  - name: interno
+    description: Solo red interna, para el gateway (tokens de máquina). No pasan por el gateway hacia afuera.
+paths:
+  /api/auth/inicio:
+    get:
+      tags: [ingreso]
+      operationId: inicio
+      summary: Configuración pública del ingreso
+      description: Clave de sitio de Turnstile y nombre de la cabecera CSRF. Deja la cookie `XSRF-TOKEN` en la respuesta (la pone el gateway).
+      security: []
+      responses:
+        '200':
+          description: Configuración del ingreso.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Inicio'
+  /api/auth/ingreso:
+    post:
+      tags: [ingreso]
+      operationId: ingresar
+      summary: 'Paso 1: usuario, contraseña y captcha'
+      description: |
+        El usuario se normaliza a minúsculas. Según el estado de la cuenta responde el paso siguiente:
+        - `codigo`: «Le enviamos un código de 6 dígitos a su correo.» (MFA por correo; vence en 15 minutos).
+        - `cambiar_clave`: contraseña inicial asignada por el administrador o vencida; se cambia con `POST /api/auth/cambiar-clave`.
+          Mensajes: «Es su primer ingreso con la contraseña que le asignó el administrador: defina una contraseña nueva.» /
+          «Su contraseña venció (vigencia de N días): defina una contraseña nueva.»
+        - `definir_clave`: primer ingreso o cambio exigido por el administrador; se envía un enlace al correo. Mensajes:
+          «Es su primer ingreso: debe definir su contraseña.» / «Debe actualizar su contraseña.», seguidos de
+          « Le enviamos un enlace a su correo.» o « No se pudo enviar el correo: avise al administrador.»
+
+        Cinco contraseñas erradas seguidas bloquean el usuario 15 minutos. Usuario inexistente, inactivo, bloqueado o con la clave
+        inicial vencida (72 h) responden igual que una contraseña errada.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Ingreso'
+      responses:
+        '200':
+          description: Paso siguiente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paso'
+        '400':
+          $ref: '#/components/responses/FormatoInvalido'
+        '401':
+          description: «Usuario o contraseña incorrectos. Después de 5 intentos fallidos el usuario se bloquea 15 minutos.» (sin `motivo`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '409':
+          description: |
+            `motivo: sesion_abierta`. «Su usuario ya tiene una sesión abierta en otro equipo o navegador. Ciérrela con «Salir», espere N
+            minutos sin actividad o pida al administrador que la cierre. Solo se permite una sesión a la vez.»
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          description: |
+            «Escriba su usuario.» · «Escriba su contraseña.» · «Por favor complete la verificación de seguridad (captcha).»
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '429':
+          description: |
+            Tope de códigos: «Ya se enviaron N códigos en la última hora. Espere un momento antes de pedir otro.», o límite de tasa del
+            gateway.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '502':
+          description: «No se pudo enviar el código a su correo. Intente de nuevo o avise al administrador.»
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+  /api/auth/codigo:
+    post:
+      tags: [ingreso]
+      operationId: verificarCodigo
+      summary: 'Paso 2: código de verificación'
+      description: |
+        Verifica el último código enviado (máximo 5 intentos; vence a los 15 minutos). Si es correcto, completa la sesión del emisor
+        (cookie `LUME_IDP`, que la SPA no lee) y responde `continuar`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Codigo'
+      responses:
+        '200':
+          description: Ingreso completo. La SPA navega a `continuar`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngresoCompleto'
+        '400':
+          $ref: '#/components/responses/FormatoInvalido'
+        '401':
+          description: |
+            `motivo: mfa_vencido`: «La verificación venció. Ingrese de nuevo con su usuario y contraseña.» (pasaron 15 minutos desde el
+            paso 1 o no hay paso 1). Sin `motivo`, el mensaje genérico de credenciales (el usuario dejó de estar activo). La SPA vuelve
+            al paso 1.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '409':
+          description: '`motivo: sesion_abierta` (mismo texto que en el paso 1).'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          description: |
+            «Escriba el código.» · «El código no es correcto. Revise el último correo que le enviamos.» · «El código venció o superó los
+            intentos. Pida un código nuevo.» · «No hay un código vigente. Pida un código nuevo.» · «El código venció o ya se usó. Pida un
+            código nuevo.»
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+  /api/auth/codigo/reenviar:
+    post:
+      tags: [ingreso]
+      operationId: reenviarCodigo
+      summary: Enviar otro código
+      description: Invalida el código anterior. Tope de 5 códigos por hora y usuario. Mensaje «Le enviamos un código nuevo.»
+      security: []
+      responses:
+        '200':
+          description: 'Código nuevo enviado (`paso: codigo`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paso'
+        '401':
+          description: '`motivo: mfa_vencido` (ver `POST /api/auth/codigo`).'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '429':
+          description: «Ya se enviaron N códigos en la última hora. Espere un momento antes de pedir otro.», o límite de tasa del gateway.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '502':
+          description: «No se pudo enviar el código a su correo. Intente de nuevo o avise al administrador.»
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+  /api/auth/cambiar-clave:
+    post:
+      tags: [ingreso]
+      operationId: cambiarClaveEnIngreso
+      summary: Cambiar la contraseña inicial o vencida dentro del ingreso
+      description: |
+        Solo después de un paso 1 que respondió `cambiar_clave` (ventana de 15 minutos). Valida la política (`reglas/Claves`), la
+        confirmación y que sea distinta de la actual; luego envía el código: «Contraseña actualizada. Le enviamos un código de 6 dígitos
+        a su correo.»
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CambioInicial'
+      responses:
+        '200':
+          description: 'Contraseña cambiada; `paso: codigo`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paso'
+        '400':
+          $ref: '#/components/responses/FormatoInvalido'
+        '401':
+          description: '`motivo: mfa_vencido` (sin paso 1 vigente), o el mensaje genérico de credenciales.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '409':
+          description: «La contraseña ya se cambió (¿envió el formulario dos veces?). Ingrese con la contraseña nueva.»
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          description: |
+            «Escriba la contraseña.» · un texto de la política de claves (ver `NuevaClave`) · «Las contraseñas no coinciden.» ·
+            «La nueva contraseña debe ser diferente a la que le asignó el administrador.» · «La nueva contraseña debe ser diferente a la
+            actual.»
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '502':
+          description: «No se pudo enviar el código a su correo. Intente de nuevo o avise al administrador.»
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+  /api/auth/olvide:
+    post:
+      tags: [ingreso]
+      operationId: olvide
+      summary: «¿Olvidó su contraseña?»
+      description: |
+        Siempre responde lo mismo, exista o no el usuario (anti-enumeración). Si el usuario o el correo corresponden a un usuario
+        activo, envía un enlace de un solo uso que vence en 60 minutos (como máximo uno cada 5 minutos por usuario). Nunca devuelve el
+        enlace.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Olvide'
+      responses:
+        '200':
+          description: «Si el usuario o el correo están registrados y activos, le enviamos un enlace para definir una contraseña nueva.»
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+        '400':
+          $ref: '#/components/responses/FormatoInvalido'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          description: «Escriba su usuario o su correo.» · «Por favor complete la verificación de seguridad (captcha).»
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+  /api/auth/clave/consultar:
+    post:
+      tags: [ingreso]
+      operationId: consultarEnlace
+      summary: Validar el enlace para definir la contraseña
+      description: |
+        Siempre 200. Si el enlace no sirve, `valido=false` con el mensaje. **Diferencia con el monolito** (`GET /api/auth/clave?tkn=`):
+        el token va en el cuerpo y no en la URL, para que no quede en los registros de acceso de ningún equipo intermedio (integradora,
+        2026-11-05). La pantalla `/definir-clave?tkn=` no cambia: la SPA lee el token y lo quita de la URL.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsultaEnlace'
+      responses:
+        '200':
+          description: |
+            `{valido: true, nombre}` o `{valido: false, mensaje: "El enlace no es válido o ya venció. Pida uno nuevo con «¿Olvidó su
+            contraseña?»."}`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnlaceClave'
+        '400':
+          $ref: '#/components/responses/FormatoInvalido'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+  /api/auth/clave:
+    post:
+      tags: [ingreso]
+      operationId: definirClave
+      summary: Definir la contraseña con el enlace
+      description: |
+        Un solo uso. Cierra la sesión abierta del usuario, quita el bloqueo y la marca de clave inicial. Respuesta: «La contraseña se
+        cambió correctamente. Inicie sesión con su nueva contraseña.»
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NuevaClave'
+      responses:
+        '200':
+          description: Contraseña definida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+        '400':
+          $ref: '#/components/responses/FormatoInvalido'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          description: |
+            «Escriba la contraseña.» · «El enlace no es válido o ya venció. Pida uno nuevo con «¿Olvidó su contraseña?».» · un texto de
+            la política de claves · «Las contraseñas no coinciden.» · «La nueva contraseña debe ser diferente a la actual.» · «El enlace
+            ya se usó. Pida uno nuevo con «¿Olvidó su contraseña?».»
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+  /api/sesion:
+    get:
+      tags: [sesion]
+      operationId: datosSesion
+      summary: Quién es, sus perfiles, el menú y los minutos de inactividad
+      description: |
+        `perfiles` son los nombres visibles de lo asignado (perfiles directos y roles adicionales), ordenados. `menu` lleva las pantallas
+        visibles permitidas en el orden de `reglas/Pantallas`; `pantallas` lleva todas las permitidas, incluidas las ocultas (p. ej.
+        `visita`). No renueva ni registra en la bitácora más de lo que lo hace cualquier petición.
+      security:
+        - sesionGateway: []
+      responses:
+        '200':
+          description: Datos de la sesión.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sesion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+  /api/sesion/estado:
+    get:
+      tags: [sesion]
+      operationId: estadoSesion
+      summary: Estado de la sesión SIN renovarla
+      description: |
+        Minutos de inactividad vigentes (el administrador los puede cambiar con la sesión abierta) y segundos que le quedan a la sesión.
+        No cuenta como actividad. Si ya venció responde 401 `inactividad`.
+      security:
+        - sesionGateway: []
+      responses:
+        '200':
+          description: Estado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstadoSesion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+  /api/sesion/mantener:
+    get:
+      tags: [sesion]
+      operationId: mantenerSesion
+      summary: «Seguir conectado»
+      description: Renueva la actividad de la sesión. Solo GET (cualquier otro método responde 405 «Método no permitido.»).
+      security:
+        - sesionGateway: []
+      responses:
+        '200':
+          description: Minutos de inactividad vigentes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Minutos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+  /api/cuenta/clave:
+    post:
+      tags: [cuenta]
+      operationId: cambiarMiClave
+      summary: Cambiar mi contraseña
+      description: |
+        Exige la contraseña actual. Una actual errada cuenta como intento fallido: al quinto, el usuario queda bloqueado 15 minutos y la
+        sesión se cierra (401 `bloqueado`). La sesión sigue abierta tras un cambio correcto. Respuesta: «Su contraseña se cambió. La
+        próxima vez ingrese con la contraseña nueva.»
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CambioClave'
+      responses:
+        '200':
+          description: Contraseña cambiada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+        '400':
+          $ref: '#/components/responses/FormatoInvalido'
+        '401':
+          description: '`motivo: bloqueado` u otro motivo de cierre de sesión (tabla del encabezado).'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '409':
+          description: «La contraseña cambió mientras tanto. Recargue e intente de nuevo.»
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          description: |
+            «Escriba su contraseña actual.» · «Escriba la contraseña nueva.» · «La contraseña actual no es correcta.» · un texto de la
+            política de claves · «Las contraseñas no coinciden.» · «La nueva contraseña debe ser diferente a la actual.»
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+  /bff/salir:
+    post:
+      tags: [bff]
+      operationId: salir
+      summary: Salir (gateway)
+      description: |
+        Lo implementa el **gateway**, no `seguridad`. Cierra la sesión del gateway (`LUME_SESION`) y la del emisor (`LUME_IDP`), revoca el
+        refresh token y marca la sesión como cerrada en `seguridad`. Idempotente: sin sesión también responde 204. Después la SPA va a
+        `/ingreso`.
+      x-implementado-por: gateway
+      responses:
+        '204':
+          description: Sesión cerrada.
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+  /api/usuarios:
+    get:
+      tags: [usuarios]
+      operationId: listarUsuarios
+      summary: Usuarios y opciones del formulario
+      description: |
+        Pantalla USUARIOS (solo Administrador). `sesionAbierta` = la que bloquearía un ingreso nuevo (decisión 7.1). `ultimoIngreso` en
+        hora de Bogotá `yyyy-MM-dd HH:mm`. `perfiles` = ids asignados (perfiles base y roles adicionales).
+
+        Sin paginar, igual que el monolito: todos los usuarios en una respuesta (unos 300).
+      security:
+        - sesionGateway: []
+      responses:
+        '200':
+          description: Usuarios, perfiles y roles asignables, ESM activos, regionales activas y fuerzas.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListaUsuarios'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+    post:
+      tags: [usuarios]
+      operationId: crearUsuario
+      summary: Crear un usuario
+      description: |
+        Sin clave inicial: «Usuario creado. Se le envió el enlace para definir su contraseña.» (o, si el correo no sale, 201 con
+        `correoOk=false` y «Usuario creado, pero NO se pudo enviar el correo (…). Use «Restablecer contraseña» cuando el correo funcione.»).
+        Con clave inicial: «Usuario creado con contraseña inicial. Entréguela al usuario por un canal seguro: deberá cambiarla en su primer
+        ingreso.»
+
+        201 sin cabecera `Location`, igual que el monolito: el `id` va en el cuerpo.
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosUsuario'
+      responses:
+        '201':
+          description: Creado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsuarioGuardado'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          $ref: '#/components/responses/ValidacionUsuario'
+  /api/usuarios/{id}:
+    put:
+      tags: [usuarios]
+      operationId: editarUsuario
+      summary: Editar un usuario
+      description: «Usuario actualizado.» Si cambia el correo, el enlace pendiente deja de servir. La clave inicial no se edita aquí.
+      security:
+        - sesionGateway: []
+      parameters:
+        - $ref: '#/components/parameters/IdUsuario'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosUsuario'
+      responses:
+        '200':
+          description: Actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsuarioGuardado'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExisteUsuario'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          $ref: '#/components/responses/ValidacionUsuario'
+  /api/usuarios/{id}/estado:
+    put:
+      tags: [usuarios]
+      operationId: cambiarEstadoUsuario
+      summary: Activar o inactivar
+      description: |
+        «Usuario activado.» / «Usuario inactivado.» Inactivar cierra su sesión y anula el enlace pendiente. 422 «No puede inactivar su
+        propio usuario.»
+      security:
+        - sesionGateway: []
+      parameters:
+        - $ref: '#/components/parameters/IdUsuario'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EstadoActivo'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExisteUsuario'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          $ref: '#/components/responses/ValidacionUsuario'
+  /api/usuarios/{id}/restablecer:
+    post:
+      tags: [usuarios]
+      operationId: restablecerClave
+      summary: Restablecer la contraseña (enlace al correo, cambio obligatorio)
+      description: |
+        «Se envió al correo del usuario el enlace para definir una contraseña nueva.» Si el correo no sale, 502 «No se pudo enviar el
+        correo: …».
+      security:
+        - sesionGateway: []
+      parameters:
+        - $ref: '#/components/parameters/IdUsuario'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExisteUsuario'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '502':
+          description: «No se pudo enviar el correo… »
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+  /api/usuarios/{id}/clave-inicial:
+    post:
+      tags: [usuarios]
+      operationId: asignarClaveInicial
+      summary: Asignar una contraseña inicial (vale 72 h; se cambia al primer ingreso)
+      description: |
+        «Contraseña inicial asignada. Entréguela al usuario por un canal seguro: deberá cambiarla al ingresar.» 422 con un texto de la
+        política de claves.
+      security:
+        - sesionGateway: []
+      parameters:
+        - $ref: '#/components/parameters/IdUsuario'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaveInicialNueva'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExisteUsuario'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          $ref: '#/components/responses/ValidacionUsuario'
+  /api/usuarios/{id}/cerrar-sesion:
+    post:
+      tags: [usuarios]
+      operationId: cerrarSesionUsuario
+      summary: Cerrar la sesión de un usuario
+      description: «Sesión cerrada.» / «El usuario no tenía una sesión abierta.» El usuario recibe 401 `cerrada` en su siguiente petición.
+      security:
+        - sesionGateway: []
+      parameters:
+        - $ref: '#/components/parameters/IdUsuario'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExisteUsuario'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+  /api/usuarios/{id}/desbloquear:
+    post:
+      tags: [usuarios]
+      operationId: desbloquearUsuario
+      summary: Quitar el bloqueo por intentos
+      description: «Usuario desbloqueado.» / «El usuario no estaba bloqueado.»
+      security:
+        - sesionGateway: []
+      parameters:
+        - $ref: '#/components/parameters/IdUsuario'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExisteUsuario'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+  /api/usuarios/seguridad:
+    get:
+      tags: [usuarios]
+      operationId: parametrosSeguridad
+      summary: Tiempo de inactividad (TIME OUT)
+      security:
+        - sesionGateway: []
+      responses:
+        '200':
+          description: Minutos vigentes y máximo (480).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParametrosSeguridad'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+    put:
+      tags: [usuarios]
+      operationId: cambiarParametrosSeguridad
+      summary: Cambiar el tiempo de inactividad
+      description: |
+        «Tiempo de inactividad actualizado: N minutos. Aplica desde la siguiente acción de cada usuario.» 422 «Escriba los minutos de
+        inactividad.» o «Los minutos de inactividad deben ser un número entero de 1 a 480.» (campo `minutosSesion`).
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CambioSeguridad'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          $ref: '#/components/responses/ValidacionUsuario'
+  /api/usuarios/roles:
+    get:
+      tags: [usuarios]
+      operationId: catalogoRoles
+      summary: Roles adicionales (Anexo 5, 1.12)
+      description: Perfiles base elegibles con sus pantallas visibles, y los roles creados con el número de usuarios activos que los tienen.
+      security:
+        - sesionGateway: []
+      responses:
+        '200':
+          description: Catálogo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogoRoles'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+    post:
+      tags: [usuarios]
+      operationId: crearRol
+      summary: Crear un rol adicional
+      description: 201 «Rol creado. Asígnelo en el formulario de cada usuario.» Sin cabecera `Location`, igual que el monolito (el `id` va en el cuerpo).
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosRol'
+      responses:
+        '201':
+          description: Creado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolCreado'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          $ref: '#/components/responses/ValidacionRol'
+  /api/usuarios/roles/{id}:
+    put:
+      tags: [usuarios]
+      operationId: editarRol
+      summary: Editar un rol adicional
+      description: «Rol actualizado. Aplica desde la siguiente acción de sus usuarios.» El perfil base no se cambia.
+      security:
+        - sesionGateway: []
+      parameters:
+        - $ref: '#/components/parameters/IdPerfil'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosRol'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExisteRol'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          $ref: '#/components/responses/ValidacionRol'
+  /api/usuarios/roles/{id}/estado:
+    put:
+      tags: [usuarios]
+      operationId: cambiarEstadoRol
+      summary: Activar o inactivar un rol
+      description: «Rol activado (N usuarios activos lo tienen).» / «Rol inactivado (N usuarios activos lo tienen).»
+      security:
+        - sesionGateway: []
+      parameters:
+        - $ref: '#/components/parameters/IdPerfil'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EstadoActivo'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExisteRol'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+  /api/usuarios/perfiles/{id}:
+    put:
+      tags: [usuarios]
+      operationId: renombrarPerfil
+      summary: Cambiar el nombre visible de un perfil
+      description: |
+        «Perfil actualizado.» 422 «El nombre del perfil debe tener de 3 a 60 caracteres.» · «Ya existe otro perfil con ese nombre.» ·
+        «La descripción tiene máximo 200 caracteres.»; 404 «El perfil no existe.»
+      security:
+        - sesionGateway: []
+      parameters:
+        - $ref: '#/components/parameters/IdPerfil'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NombrePerfil'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          description: «El perfil no existe.»
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          $ref: '#/components/responses/ValidacionRol'
+  /api/logs/opciones:
+    get:
+      tags: [logs]
+      operationId: opcionesLogs
+      summary: Opciones de los filtros de Logs
+      description: |
+        Igual que `GET /api/logs/opciones` del monolito (`auditoria/ControladorLogs`). `usuarios` son todos los usuarios, incluidos los
+        inactivos: la bitácora conserva su historia. `correoDefecto` es `""` si no está configurado.
+      security:
+        - sesionGateway: []
+      responses:
+        '200':
+          description: Opciones.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpcionesLogs'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermisoLogs'
+  /api/logs:
+    get:
+      tags: [logs]
+      operationId: listarLogs
+      summary: Logs del sistema, por páginas de 100
+      description: |
+        Igual que el monolito. Siempre se consulta por un rango de fechas en hora de Bogotá; sin fechas, los últimos 7 días hasta hoy. Si
+        las fechas vienen invertidas, se intercambian. Con `texto`, el periodo es de máximo 92 días. El orden va de lo más reciente a lo más
+        antiguo; la página siguiente se pide con `despuesFecha` y `despuesId` tomados de `siguiente`.
+
+        422: «La página pedida no es válida.» · «Para buscar por texto, use un periodo de máximo 92 días.» · «El tipo y el módulo son
+        palabras sin espacios (p. ej. usuario_editado o usuarios).»
+      security:
+        - sesionGateway: []
+      parameters:
+        - $ref: '#/components/parameters/LogsDesde'
+        - $ref: '#/components/parameters/LogsHasta'
+        - $ref: '#/components/parameters/LogsUsuarioId'
+        - $ref: '#/components/parameters/LogsOperacion'
+        - $ref: '#/components/parameters/LogsTexto'
+        - $ref: '#/components/parameters/LogsModulo'
+        - $ref: '#/components/parameters/LogsTipo'
+        - name: despuesFecha
+          in: query
+          required: false
+          description: '`siguiente.fecha` de la página anterior (ISO 8601 con zona, tal cual se recibió).'
+          schema: {type: string}
+        - name: despuesId
+          in: query
+          required: false
+          description: '`siguiente.id` de la página anterior.'
+          schema: {type: integer, format: int64}
+      responses:
+        '200':
+          description: Una página de registros.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaLogs'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermisoLogs'
+        '422':
+          $ref: '#/components/responses/ValidacionLogs'
+  /api/logs/exportar:
+    get:
+      tags: [logs]
+      operationId: exportarLogs
+      summary: Descargar los logs en Excel o CSV
+      description: |
+        Igual que el monolito. Exporta los mismos filtros que `GET /api/logs`, sin paginar. El archivo se llama
+        `logs_auditoria_yyyyMMdd_HHmm.xlsx` o `.csv` (hora de Bogotá) y va como adjunto (`Content-Disposition: attachment`).
+
+        Lleva un encabezado con el título «Logs de auditoría», la fecha de generación, quién lo generó y los filtros (`Periodo`,
+        `Usuario (id)`, `Operación`, `Texto`, `Módulo`, `Tipo`). Las columnas son `Fecha y hora`, `Usuario`, `Operación`, `Tipo`,
+        `Detalle`, `IP` y `Cambios (antes → después)`.
+
+        Un reporte incompleto no se entrega: con más de 200 000 registros responde 422 «El periodo tiene más de 200000 registros.
+        Acótelo (fechas, usuario u operación) y exporte de nuevo.»
+      security:
+        - sesionGateway: []
+      parameters:
+        - $ref: '#/components/parameters/LogsDesde'
+        - $ref: '#/components/parameters/LogsHasta'
+        - $ref: '#/components/parameters/LogsUsuarioId'
+        - $ref: '#/components/parameters/LogsOperacion'
+        - $ref: '#/components/parameters/LogsTexto'
+        - $ref: '#/components/parameters/LogsModulo'
+        - $ref: '#/components/parameters/LogsTipo'
+        - name: formato
+          in: query
+          required: false
+          description: '`xlsx` (por defecto) o `csv`.'
+          schema:
+            type: string
+            enum: [xlsx, csv]
+            default: xlsx
+      responses:
+        '200':
+          description: El archivo.
+          headers:
+            Content-Disposition:
+              description: '`attachment; filename="logs_auditoria_yyyyMMdd_HHmm.xlsx"` (o `.csv`).'
+              schema: {type: string}
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: {type: string, format: binary}
+            text/csv:
+              schema: {type: string, format: binary}
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermisoLogs'
+        '422':
+          $ref: '#/components/responses/ValidacionLogs'
+  /api/logs/enviar:
+    post:
+      tags: [logs]
+      operationId: enviarLogs
+      summary: Enviar los logs por correo
+      description: |
+        Igual que el monolito. Genera el mismo archivo que `GET /api/logs/exportar`, con los filtros del cuerpo, y lo envía adjunto a
+        `para`. Responde 200 «Reporte enviado a <para>.» y deja en la bitácora `reporte_enviado`, con el correo enmascarado.
+
+        422: «Escriba un correo válido para enviar el reporte.» · «Los reportes solo se envían a correos de: <dominios>.» · los mismos
+        de los filtros y del tope de 200 000 registros. 502: «No se pudo enviar el correo: <error>».
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnvioLogs'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermisoLogs'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          $ref: '#/components/responses/ValidacionLogs'
+        '502':
+          description: "«No se pudo enviar el correo: <error>»"
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+  /interno/sesiones/{sid}:
+    get:
+      tags: [interno]
+      operationId: estadoSesionInterno
+      summary: Estado de una sesión (solo el gateway)
+      description: |
+        **Solo red interna.** El gateway lo consulta en cada petición `/api/**` (con caché de 30 s como máximo) y cierra su sesión si la
+        respuesta no es vigente, con el `motivo` y el `mensaje` del 401 (tabla del encabezado). Revisa, en el orden de `FiltroSesion` del
+        monolito: usuario inactivo, contraseña cambiada después del inicio, sesión cerrada (por salida, el administrador, otro ingreso o
+        bloqueo), contraseña vencida y cambio exigido (este último envía el enlace). La inactividad la mide el gateway con `minutos` y la
+        informa con `cerrar`. Consultar el estado no cuenta como actividad. Token de máquina con el alcance `seguridad:sesiones`.
+      security:
+        - maquina: [seguridad:sesiones]
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+      responses:
+        '200':
+          description: Estado (vigente o no, con su motivo).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstadoInterno'
+        '401':
+          description: Sin token de máquina.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '403':
+          description: Token sin el alcance `seguridad:sesiones`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+  /interno/sesiones/{sid}/actividad:
+    post:
+      tags: [interno]
+      operationId: actividadSesionInterno
+      summary: Actividad de una sesión (solo el gateway)
+      description: |
+        **Solo red interna.** El gateway informa la actividad como máximo cada 30 s; con ella `seguridad` decide si un ingreso nuevo del
+        mismo usuario se rechaza (decisión 7.1: una sola sesión activa). Nunca mueve la actividad hacia atrás.
+      security:
+        - maquina: [seguridad:sesiones]
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+      responses:
+        '204':
+          description: Registrada (o la sesión ya estaba cerrada).
+        '401':
+          description: Sin token de máquina.
+        '403':
+          description: Token sin el alcance `seguridad:sesiones`.
+  /interno/sesiones/{sid}/cerrar:
+    post:
+      tags: [interno]
+      operationId: cerrarSesionInterno
+      summary: Cerrar una sesión (solo el gateway)
+      description: |
+        **Solo red interna.** Cierra la sesión y revoca sus autorizaciones (refresh token) y la sesión del emisor. Lo usa el gateway al
+        salir (`salida`) y al vencer la inactividad (`inactividad`). Idempotente.
+      security:
+        - maquina: [seguridad:sesiones]
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CierreInterno'
+      responses:
+        '204':
+          description: Cerrada (o ya lo estaba).
+        '401':
+          description: Sin token de máquina.
+        '403':
+          description: Token sin el alcance `seguridad:sesiones`.
+        '422':
+          description: Motivo no válido.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+components:
+  securitySchemes:
+    sesionGateway:
+      $ref: './comun.yaml#/components/securitySchemes/sesionGateway'
+    maquina:
+      type: oauth2
+      description: Token de máquina (client_credentials) emitido por `seguridad`; la audiencia es el servicio del alcance.
+      flows:
+        clientCredentials:
+          tokenUrl: /oauth2/token
+          scopes:
+            'seguridad:sesiones': Consultar, informar actividad y cerrar sesiones (gateway).
+  parameters:
+    IdUsuario:
+      name: id
+      in: path
+      required: true
+      schema: {type: integer, format: int64}
+    IdPerfil:
+      name: id
+      in: path
+      required: true
+      description: Id del perfil o del rol adicional.
+      schema: {type: integer, format: int32}
+    LogsDesde:
+      name: desde
+      in: query
+      required: false
+      description: Primer día, `yyyy-MM-dd` (hora de Bogotá). Sin él, hoy menos 7 días.
+      schema: {type: string, format: date}
+    LogsHasta:
+      name: hasta
+      in: query
+      required: false
+      description: Último día, incluido, `yyyy-MM-dd`. Sin él, hoy.
+      schema: {type: string, format: date}
+    LogsUsuarioId:
+      name: usuarioId
+      in: query
+      required: false
+      description: Id del usuario (de `opciones.usuarios`).
+      schema: {type: integer, format: int64}
+    LogsOperacion:
+      name: operacion
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/OperacionLog'
+    LogsTexto:
+      name: texto
+      in: query
+      required: false
+      description: Busca en el detalle. Con texto, el periodo es de máximo 92 días.
+      schema: {type: string, maxLength: 80}
+    LogsModulo:
+      name: modulo
+      in: query
+      required: false
+      description: Exacto (de `opciones.modulos`). Se pasa a minúsculas y debe cumplir `^[a-z0-9_.-]{1,50}$`.
+      schema: {type: string, maxLength: 50}
+    LogsTipo:
+      name: tipo
+      in: query
+      required: false
+      description: Exacto, p. ej. `usuario_editado`. Se pasa a minúsculas y debe cumplir `^[a-z0-9_.-]{1,50}$`.
+      schema: {type: string, maxLength: 50}
+    Sid:
+      name: sid
+      in: path
+      required: true
+      description: Id de la sesión (claim `sid` del token).
+      schema:
+        type: string
+        format: uuid
+  # Las mismas respuestas de comun.yaml, declaradas aquí sobre el alias Problema para que el código generado no invente modelos.
+  responses:
+    SinPermiso:
+      description: «No tiene permiso para esta acción.» (la pantalla USUARIOS es solo del Administrador).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    SinPermisoLogs:
+      description: «No tiene permiso para esta acción.» (la pantalla LOGS es solo del Administrador).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    ValidacionLogs:
+      description: Filtros, página, tope de exportación o correo no válidos (textos del monolito en cada operación).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    ConMensaje:
+      description: Hecho; el texto para mostrar va en `mensaje`.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Mensaje'
+    NoExisteUsuario:
+      description: «El usuario no existe.»
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    NoExisteRol:
+      description: «El rol no existe.»
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    ValidacionUsuario:
+      description: Datos no válidos (textos del monolito; `campo` cuando aplica). Ver `DatosUsuario`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    ValidacionRol:
+      description: |
+        «El nombre del rol debe tener de 3 a 60 caracteres.» · «La descripción tiene máximo 200 caracteres.» · «Ya existe un perfil o rol
+        con ese nombre.» · «Hay una pantalla no válida.» · «El perfil base no es válido: un rol adicional no deriva del Administrador ni
+        del Auditor.» · «Marque al menos una pantalla para el rol.» · «La pantalla «X» no es del perfil base Y.» · «El perfil base de un rol
+        no se cambia: cambiaría el alcance de sus usuarios. Cree otro rol.»
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    NoAutenticado:
+      description: |
+        Sin sesión o sesión cerrada; el `motivo` dice por qué (tabla del encabezado). `sin_sesion` = «La sesión expiró. Vuelva a iniciar
+        sesión.»
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    PaginaExpirada:
+      description: CSRF ausente o inválido (lo aplica el gateway). «La página expiró. Recárguela e intente de nuevo.»
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    FormatoInvalido:
+      description: «La petición no tiene el formato esperado.»
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    DemasiadasPeticiones:
+      description: Límite de tasa superado.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+  schemas:
+    # Alias de los comunes: así el código generado los llama Problema y Mensaje (y no Ingresar400Response...).
+    Problema:
+      $ref: './comun.yaml#/components/schemas/Problema'
+    Mensaje:
+      $ref: './comun.yaml#/components/schemas/Mensaje'
+    Inicio:
+      type: object
+      required: [captchaDesactivado, csrf]
+      properties:
+        captchaSitio:
+          type: [string, 'null']
+          description: Clave pública de sitio de Cloudflare Turnstile. En local y en e2e, la clave de prueba pública que documenta Cloudflare.
+        captchaDesactivado:
+          type: boolean
+          description: true solo en local sin clave configurada (la SPA no muestra el widget).
+        csrf:
+          type: string
+          description: Nombre de la cabecera CSRF.
+          examples: [X-XSRF-TOKEN]
+    Ingreso:
+      type: object
+      required: [usuario, clave]
+      properties:
+        usuario:
+          type: string
+          maxLength: 50
+        clave:
+          type: string
+          maxLength: 200
+          format: password
+        captcha:
+          type: [string, 'null']
+          description: Respuesta del widget Turnstile.
+    Paso:
+      type: object
+      required: [paso, mensaje]
+      properties:
+        paso:
+          type: string
+          enum: [codigo, definir_clave, cambiar_clave]
+        mensaje:
+          type: string
+        correo:
+          type: [string, 'null']
+          description: Correo del usuario enmascarado (p. ej. `ana***@seguridad.prueba.local`).
+        enlaceLocal:
+          type: [string, 'null']
+          description: Se conserva por compatibilidad con el monolito; siempre `null` (el enlace se lee del correo).
+    Codigo:
+      type: object
+      required: [codigo]
+      properties:
+        codigo:
+          type: string
+          maxLength: 10
+          description: Los 6 dígitos del correo (se ignoran los espacios de los extremos).
+    IngresoCompleto:
+      type: object
+      required: [usuario, nombre, continuar]
+      properties:
+        usuario:
+          type: string
+        nombre:
+          type: string
+        continuar:
+          type: string
+          description: |
+            URL relativa al origen (siempre empieza por `/`) de la autorización OIDC pendiente. Si el ingreso no vino del gateway, es
+            `/bff/oauth2/authorization/lume`. La SPA navega con `window.location.assign(continuar)`.
+          examples: ['/oauth2/authorize?response_type=code&client_id=gateway&...']
+    CambioInicial:
+      type: object
+      required: [clave]
+      properties:
+        clave:
+          type: string
+          maxLength: 200
+          format: password
+        confirmacion:
+          type: [string, 'null']
+          format: password
+    Olvide:
+      type: object
+      required: [valor]
+      properties:
+        valor:
+          type: string
+          maxLength: 150
+          description: Usuario o correo.
+        captcha:
+          type: [string, 'null']
+    ConsultaEnlace:
+      type: object
+      required: [tkn]
+      properties:
+        tkn:
+          type: string
+          maxLength: 64
+          description: Token del enlace (64 caracteres hexadecimales). En la base solo se guarda su SHA-256.
+    EnlaceClave:
+      type: object
+      required: [valido]
+      properties:
+        valido:
+          type: boolean
+        nombre:
+          type: string
+          description: Solo si `valido`.
+        mensaje:
+          type: string
+          description: Solo si no es válido.
+    NuevaClave:
+      type: object
+      description: |
+        Política de claves (`reglas/Claves`): «La contraseña debe tener mínimo 12 caracteres.» · «La contraseña no puede tener ñ ni
+        tildes.» · «La contraseña debe tener máximo 64 caracteres.» · «La contraseña debe tener mayúsculas y minúsculas.» · «La
+        contraseña debe tener al menos un número.» · «La contraseña debe tener al menos un carácter especial.»
+      required: [tkn, clave]
+      properties:
+        tkn:
+          type: string
+          maxLength: 64
+        clave:
+          type: string
+          maxLength: 200
+          format: password
+        confirmacion:
+          type: [string, 'null']
+          format: password
+    CambioClave:
+      type: object
+      required: [actual, clave]
+      properties:
+        actual:
+          type: string
+          maxLength: 200
+          format: password
+        clave:
+          type: string
+          maxLength: 200
+          format: password
+        confirmacion:
+          type: [string, 'null']
+          format: password
+    EntradaMenu:
+      type: object
+      required: [ruta, titulo, grupo]
+      properties:
+        ruta:
+          type: string
+          examples: [agenda]
+        titulo:
+          type: string
+        grupo:
+          type: string
+          description: Cadena vacía si no tiene grupo.
+    Sesion:
+      type: object
+      required: [id, usuario, nombre, perfiles, menu, pantallas, minutosInactividad]
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: El mismo id numérico del monolito.
+        usuario:
+          type: string
+        nombre:
+          type: string
+        perfiles:
+          type: array
+          items:
+            type: string
+        menu:
+          type: array
+          items:
+            $ref: '#/components/schemas/EntradaMenu'
+        pantallas:
+          type: array
+          items:
+            type: string
+        minutosInactividad:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 480
+    EstadoSesion:
+      type: object
+      required: [minutos, restantes]
+      properties:
+        minutos:
+          type: integer
+          format: int32
+        restantes:
+          type: integer
+          format: int64
+          description: Segundos que le quedan a la sesión antes de cerrarse por inactividad.
+    Minutos:
+      type: object
+      required: [minutos]
+      properties:
+        minutos:
+          type: integer
+          format: int32
+    FilaUsuario:
+      type: object
+      required: [id, nombre, usuario, correo, activo, bloqueado, sesionAbierta, claveInicial, perfiles]
+      properties:
+        id: {type: integer, format: int64}
+        nombre: {type: string}
+        documento: {type: [string, 'null']}
+        telefono: {type: [string, 'null']}
+        usuario: {type: string}
+        correo: {type: string}
+        activo: {type: boolean}
+        ultimoIngreso: {type: [string, 'null'], description: 'yyyy-MM-dd HH:mm, hora de Bogotá'}
+        bloqueado: {type: boolean}
+        sesionAbierta: {type: boolean}
+        claveInicial: {type: boolean}
+        perfiles: {type: array, items: {type: integer, format: int32}, description: Ids asignados (perfiles base y roles adicionales).}
+        alcanceFuerza: {type: [string, 'null']}
+        alcancePunto: {type: [integer, 'null'], format: int64}
+        alcanceRegional: {type: [integer, 'null'], format: int64}
+    PerfilAsignable:
+      type: object
+      required: [id, nombre]
+      properties:
+        id: {type: integer, format: int32}
+        nombre: {type: string}
+        descripcion: {type: [string, 'null']}
+        baseId: {type: [integer, 'null'], format: int32, description: Solo en los roles adicionales.}
+    PuntoEsm:
+      type: object
+      required: [id, nombre]
+      properties:
+        id: {type: integer, format: int64}
+        nombre: {type: string}
+        sigla: {type: [string, 'null']}
+        fuerza: {type: [string, 'null']}
+    Regional:
+      type: object
+      required: [id, nombre]
+      properties:
+        id: {type: integer, format: int64}
+        nombre: {type: string}
+    Fuerza:
+      type: object
+      required: [codigo, nombre]
+      properties:
+        codigo: {type: string, enum: [EJC, ARC, FAC]}
+        nombre: {type: string}
+    ListaUsuarios:
+      type: object
+      required: [usuarios, perfiles, puntos, regionales, fuerzas]
+      properties:
+        usuarios: {type: array, items: {$ref: '#/components/schemas/FilaUsuario'}}
+        perfiles: {type: array, items: {$ref: '#/components/schemas/PerfilAsignable'}}
+        puntos: {type: array, items: {$ref: '#/components/schemas/PuntoEsm'}}
+        regionales: {type: array, items: {$ref: '#/components/schemas/Regional'}}
+        fuerzas: {type: array, items: {$ref: '#/components/schemas/Fuerza'}}
+    DatosUsuario:
+      type: object
+      description: |
+        Validaciones del monolito (`ServicioUsuarios.guardar`), todas 422 con `campo` cuando aplica: nombre de 3 a 150; usuario
+        `^[a-z0-9._-]{3,50}$`; correo válido; documento y teléfono máximo 30; teléfono móvil colombiano (+57 y 10 dígitos que empiezan por
+        3); al menos un perfil; combinaciones válidas; documento obligatorio para Auditor; fuerza para Sanidad; ESM activo para ESM;
+        regional activa para OPL regional; usuario y correo únicos; no quitarse a sí mismo el perfil Administrador.
+      properties:
+        nombre: {type: [string, 'null']}
+        documento: {type: [string, 'null']}
+        telefono: {type: [string, 'null']}
+        usuario: {type: [string, 'null']}
+        correo: {type: [string, 'null']}
+        perfiles: {type: [array, 'null'], items: {type: integer, format: int32}}
+        alcanceFuerza: {type: [string, 'null']}
+        alcancePunto: {type: [integer, 'null'], format: int64}
+        alcanceRegional: {type: [integer, 'null'], format: int64}
+        claveInicial: {type: [string, 'null'], format: password, description: Solo al crear. Si viene, cumple la política de claves.}
+    UsuarioGuardado:
+      type: object
+      required: [id, creado, correoOk, mensaje]
+      properties:
+        id: {type: integer, format: int64}
+        creado: {type: boolean}
+        correoOk: {type: boolean}
+        mensaje: {type: string}
+        enlaceLocal: {type: [string, 'null'], description: Siempre null (compatibilidad con el monolito).}
+    EstadoActivo:
+      type: object
+      required: [activo]
+      properties:
+        activo: {type: boolean}
+    ClaveInicialNueva:
+      type: object
+      properties:
+        clave: {type: [string, 'null'], format: password}
+    ParametrosSeguridad:
+      type: object
+      required: [minutosSesion, minutosMaximo]
+      properties:
+        minutosSesion: {type: integer, format: int32}
+        minutosMaximo: {type: integer, format: int32}
+    CambioSeguridad:
+      type: object
+      properties:
+        minutosSesion: {type: [integer, 'null'], format: int32}
+    PantallaElegible:
+      type: object
+      required: [codigo, titulo]
+      properties:
+        codigo: {type: string, description: Constante de reglas/Pantallas (p. ej. RIESGO).}
+        titulo: {type: string}
+    BaseRol:
+      type: object
+      required: [id, nombre, pantallas]
+      properties:
+        id: {type: integer, format: int32}
+        nombre: {type: string}
+        pantallas: {type: array, items: {$ref: '#/components/schemas/PantallaElegible'}}
+    RolAdicional:
+      type: object
+      required: [id, nombre, baseId, activo, pantallas, usuarios]
+      properties:
+        id: {type: integer, format: int32}
+        nombre: {type: string}
+        descripcion: {type: [string, 'null']}
+        baseId: {type: integer, format: int32}
+        activo: {type: boolean}
+        pantallas: {type: array, items: {type: string}}
+        usuarios: {type: integer, format: int64, description: Usuarios activos que lo tienen asignado.}
+    CatalogoRoles:
+      type: object
+      required: [bases, roles]
+      properties:
+        bases: {type: array, items: {$ref: '#/components/schemas/BaseRol'}}
+        roles: {type: array, items: {$ref: '#/components/schemas/RolAdicional'}}
+    DatosRol:
+      type: object
+      properties:
+        nombre: {type: [string, 'null']}
+        descripcion: {type: [string, 'null']}
+        baseId: {type: [integer, 'null'], format: int32}
+        pantallas: {type: [array, 'null'], items: {type: string}}
+    RolCreado:
+      type: object
+      required: [id, mensaje]
+      properties:
+        id: {type: integer, format: int32}
+        mensaje: {type: string}
+    NombrePerfil:
+      type: object
+      properties:
+        nombre: {type: [string, 'null']}
+        descripcion: {type: [string, 'null']}
+    EstadoInterno:
+      type: object
+      required: [vigente, minutos]
+      properties:
+        vigente:
+          type: boolean
+        minutos:
+          type: integer
+          format: int32
+          description: Minutos de inactividad vigentes (el gateway mide la inactividad con ellos).
+        uid:
+          type: [integer, 'null']
+          format: int64
+        motivo:
+          type: [string, 'null']
+          description: Si no es vigente, el `motivo` del 401 (tabla del encabezado).
+          enum: [sin_sesion, inactividad, inactivo, clave, cerrada, reemplazada, clave_vencida, cambio_clave, bloqueado, null]
+        mensaje:
+          type: [string, 'null']
+          description: Si no es vigente, el texto del 401.
+    CierreInterno:
+      type: object
+      required: [motivo]
+      properties:
+        motivo:
+          type: string
+          enum: [salida, inactividad]
+    OperacionLog:
+      type: string
+      description: |
+        Operación de la bitácora. La pantalla muestra insercion → «Inserción», actualizacion → «Actualización», eliminacion →
+        «Eliminación», consulta → «Consulta», ingreso → «Ingreso» y salida → «Salida».
+      enum: [insercion, actualizacion, eliminacion, consulta, ingreso, salida]
+    UsuarioLog:
+      type: object
+      required: [id, nombre, usuario]
+      properties:
+        id: {type: integer, format: int64}
+        nombre: {type: string}
+        usuario: {type: string}
+    OpcionesLogs:
+      type: object
+      required: [operaciones, usuarios, modulos, correoDefecto]
+      properties:
+        operaciones:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperacionLog'
+        usuarios:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsuarioLog'
+        modulos:
+          type: array
+          description: Módulos que aparecen en la bitácora.
+          items: {type: string}
+        correoDefecto:
+          type: string
+          description: Correo sugerido para «Enviar por correo»; `""` si no hay.
+    CambioLog:
+      type: object
+      required: [campo, oculto]
+      properties:
+        campo: {type: string}
+        antes: {type: [string, 'null']}
+        despues: {type: [string, 'null']}
+        oculto:
+          type: boolean
+          description: |
+            Dato personal (Ley 1581): no se guarda el valor y `antes` y `despues` son nulos. La pantalla muestra «Modificado (dato personal:
+            no se guarda el valor, Ley 1581)». Si los cambios guardados no se pueden leer llega un único `{campo: "(cambios ilegibles)",
+            oculto: true}`.
+    FilaLog:
+      type: object
+      required: [id, fecha, fechaLlave, operacion, tipo, descripcion]
+      properties:
+        id: {type: integer, format: int64}
+        fecha:
+          type: string
+          description: Hora de Bogotá, `yyyy-MM-dd HH:mm:ss`.
+        fechaLlave:
+          type: string
+          description: El instante exacto (ISO 8601 con zona), para el cursor.
+        usuario: {type: [string, 'null']}
+        operacion:
+          $ref: '#/components/schemas/OperacionLog'
+        tipo:
+          type: string
+          description: P. ej. `usuario_editado` o `login`.
+        modulo: {type: [string, 'null']}
+        servicio:
+          type: [string, 'null']
+          description: Servicio que originó el registro (nuevo respecto al monolito; `null` en los registros migrados).
+        descripcion: {type: string}
+        ip: {type: [string, 'null']}
+        cambios:
+          type: [array, 'null']
+          description: Antes y después de cada campo que cambió, o `null` si el registro no tiene cambios.
+          items:
+            $ref: '#/components/schemas/CambioLog'
+    CursorLogs:
+      type: object
+      required: [fecha, id]
+      properties:
+        fecha:
+          type: string
+          description: Se envía tal cual como `despuesFecha`.
+        id:
+          type: integer
+          format: int64
+          description: Se envía como `despuesId`.
+    PaginaLogs:
+      type: object
+      required: [filas, desde, hasta]
+      properties:
+        filas:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/FilaLog'
+        siguiente:
+          description: Cursor de la página siguiente, o `null` si no hay más.
+          oneOf:
+            - $ref: '#/components/schemas/CursorLogs'
+            - type: 'null'
+        desde:
+          type: string
+          format: date
+          description: El periodo que se aplicó (ya normalizado).
+        hasta:
+          type: string
+          format: date
+    EnvioLogs:
+      type: object
+      required: [para]
+      properties:
+        desde: {type: [string, 'null'], format: date}
+        hasta: {type: [string, 'null'], format: date}
+        usuarioId: {type: [integer, 'null'], format: int64}
+        operacion:
+          oneOf:
+            - $ref: '#/components/schemas/OperacionLog'
+            - type: 'null'
+        texto: {type: [string, 'null'], maxLength: 80}
+        modulo: {type: [string, 'null'], maxLength: 50}
+        tipo: {type: [string, 'null'], maxLength: 50}
+        formato:
+          type: [string, 'null']
+          enum: [xlsx, csv, null]
+          description: Por defecto `xlsx` (la pantalla siempre envía `xlsx`).
+        para:
+          type: string
+          description: Correo de destino; solo de los dominios permitidos para reportes.

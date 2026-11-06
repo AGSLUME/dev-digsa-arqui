@@ -1,0 +1,1042 @@
+openapi: 3.1.0
+info:
+  title: LUME · visitas
+  version: 0.1.0
+  description: |
+    API del servicio `visitas` (ADR-002), tal como la ve la SPA **a través del gateway** (mismo origen, `TokenRelay`).
+
+    **Estado:** VA1 (sesión visitas-a): catálogos (`/api/catalogos/**`) y maestros (`/api/maestros/**`). La agenda (`/api/agenda`,
+    `/api/calendario`, `/api/mis-visitas`, `/api/solicitudes`, `/api/propuesta`) entra en VA2. Ejecución, hallazgos, OPL, tablero y
+    exportación los agrega visitas-b en su bloque.
+
+    **Paridad.** Rutas, cuerpos, códigos HTTP y textos son los del monolito (`digsa-java`: `catalogos/ControladorCatalogos`,
+    `ServicioCatalogos`, `maestros/ControladorMaestros`, `ServicioMaestros`). Diferencias, todas justificadas:
+    1. Los errores son RFC 7807 con `mensaje`, `campo` y `motivo` (ver `comun.yaml`), un superconjunto de `{mensaje, campo?}`.
+    2. **Parámetros (decisión D6):** `GET /api/catalogos` devuelve solo las claves de visitas. Las de presupuesto siguen en el monolito y
+       las de la bandeja de correos y las alertas (`bandeja_retencion_dias`, `alertas_bloqueo_cuentas`) pasan a `notificaciones`.
+    3. Un catálogo no puede tener el código `fuerzas` ni `regionales` (en el monolito quedaba inalcanzable por la ruta).
+    4. Los usuarios (alcance de fuerza, punto y regional; perfil Auditor) se leen de la copia local que mantienen los eventos de
+       `seguridad` (ADR-002, D2). Un usuario recién creado puede tardar unos segundos en contar.
+    5. Una obligación con `fuente` de más de 200 caracteres responde 422 «La fuente de la obligación tiene máximo 200 caracteres.»
+       (el monolito dejaba fallar el CHECK de la base con un 500).
+    6. **Archivos subidos (decisión del usuario, 2026-11-06):** no se admiten documentos de Office con macros u objetos activos (OOXML con
+       `vbaProject.bin`, `activeX/` o `embeddings/`) ni el OLE genérico que no es Word ni Excel: «El archivo «X» no es de un tipo admitido
+       (fotos, PDF, Word, Excel, video o texto).». El monolito los aceptaba. El tamaño se revisa antes del contenido. Aplica a todo endpoint
+       que reciba archivos (solicitudes en VA2; evidencias de visitas-b).
+    7. `/interno/**` solo acepta tokens de máquina; la autorización por pantalla se revisa antes de leer el cuerpo (403 y no 400).
+
+    **Autorización.** Pantalla CATALOGOS o MAESTROS del token (Coordinador; el Administrador entra a todo). `GET /api/catalogos/municipios`
+    solo exige sesión. Sin la pantalla: 403 «No tiene permiso para esta acción.».
+
+    **CSRF.** Toda escritura lleva `X-XSRF-TOKEN` (lo aplica el gateway; sin ella, 419).
+paths:
+  /api/catalogos:
+    get:
+      tags: [catalogos]
+      operationId: listarCatalogos
+      summary: Todo lo de la pantalla Catálogos y las listas de los formularios
+      security:
+        - sesionGateway: []
+      responses:
+        '200':
+          description: Fuerzas, catálogos con sus valores, regionales, parámetros, unidades, modalidades, tipos de visita y departamentos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Catalogos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+  /api/catalogos/municipios:
+    get:
+      tags: [catalogos]
+      operationId: listarMunicipios
+      summary: Municipios de un departamento (los usan también maestros y agenda)
+      description: Solo exige sesión. 422 «Elija el departamento.» si `departamento` no son dos dígitos.
+      security:
+        - sesionGateway: []
+      parameters:
+        - name: departamento
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Municipios ordenados por nombre.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CodigoNombre'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '422':
+          $ref: '#/components/responses/Validacion'
+  /api/catalogos/fuerzas:
+    post:
+      tags: [catalogos]
+      operationId: crearFuerza
+      summary: Crear una fuerza
+      description: |
+        201 «Fuerza creada.». 422: «El código de la fuerza debe tener de 2 a 5 letras mayúsculas (p. ej. EJC).» · «El nombre de la fuerza
+        debe tener de 2 a 120 caracteres.» · «La sanidad (DISAN o JEFSA) tiene máximo 150 caracteres.» · «El correo «X» no es válido.» ·
+        «Máximo 10 correos.» · «Ya existe una fuerza con el código X.». El código se pasa a mayúsculas; `activo` se ignora (queda activa).
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosFuerza'
+      responses:
+        '201':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '422':
+          $ref: '#/components/responses/Validacion'
+  /api/catalogos/fuerzas/{codigo}:
+    parameters:
+      - name: codigo
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      tags: [catalogos]
+      operationId: editarFuerza
+      summary: Editar o inactivar una fuerza
+      description: |
+        «Fuerza actualizada.». El `codigo` del cuerpo se ignora; `activo` nulo cuenta como true. Inactivar siempre se puede: los puntos que
+        la usan la conservan. 404 «La fuerza no existe.»; 422 como al crear.
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosFuerza'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExiste'
+        '422':
+          $ref: '#/components/responses/Validacion'
+    delete:
+      tags: [catalogos]
+      operationId: eliminarFuerza
+      summary: Eliminar una fuerza que nadie usa
+      description: |
+        «Fuerza eliminada.». 404 «La fuerza no existe.». 422 «La fuerza X está en uso (N puntos o usuarios). Inactívela en lugar de
+        eliminarla.» o, si quedó en uso mientras se eliminaba, «La fuerza X quedó en uso mientras se eliminaba. Inactívela en lugar de
+        eliminarla.».
+      security:
+        - sesionGateway: []
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExiste'
+        '422':
+          $ref: '#/components/responses/Validacion'
+  /api/catalogos/{catalogo}/valores:
+    parameters:
+      - name: catalogo
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [catalogos]
+      operationId: crearValor
+      summary: Crear un valor de un catálogo parametrizable
+      description: |
+        201 `{id, mensaje: «Valor creado.»}`. 404 «El catálogo no existe.». 422: «El código «X» no tiene el formato de {catálogo}» más
+        « (de 1 a 3 letras mayúsculas, p. ej. C).» (tipo_documento), « (de 1 a 3 dígitos, p. ej. 1).» (tipo_factura) o «.» ·
+        «La descripción debe tener de 2 a 120 caracteres.» · «Ya existe el código X en {catálogo}.».
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosValor'
+      responses:
+        '201':
+          $ref: '#/components/responses/Creado'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExiste'
+        '422':
+          $ref: '#/components/responses/Validacion'
+  /api/catalogos/valores/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: [catalogos]
+      operationId: editarValor
+      summary: Editar un valor
+      description: «Valor actualizado.». 404 «El valor no existe.». 422 como al crear. `activo` nulo conserva el actual.
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosValor'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExiste'
+        '422':
+          $ref: '#/components/responses/Validacion'
+    delete:
+      tags: [catalogos]
+      operationId: eliminarValor
+      summary: Eliminar un valor
+      description: «Valor eliminado.». 404 «El valor no existe.». Como el monolito, no revisa si el valor se usa.
+      security:
+        - sesionGateway: []
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExiste'
+  /api/catalogos/regionales:
+    post:
+      tags: [catalogos]
+      operationId: crearRegional
+      summary: Crear una regional de la interventoría
+      description: |
+        201 `{id, mensaje: «Regional creada.»}`. 422: «El nombre de la regional debe tener de 2 a 80 caracteres.» · «Máximo 30
+        regionales.» · «Ya existe la regional «X».».
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosRegional'
+      responses:
+        '201':
+          $ref: '#/components/responses/Creado'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '422':
+          $ref: '#/components/responses/Validacion'
+  /api/catalogos/regionales/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: [catalogos]
+      operationId: editarRegional
+      summary: Renombrar o inactivar una regional (nunca se borra)
+      description: |
+        «Regional actualizada.». `activo` nulo cuenta como true. 404 «La regional no existe.». 422 como al crear, o «La regional tiene N
+        usuarios OPL regional activos: cámbielos antes de inactivarla.».
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosRegional'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExiste'
+        '422':
+          $ref: '#/components/responses/Validacion'
+  /api/catalogos/parametros/{clave}:
+    parameters:
+      - name: clave
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      tags: [catalogos]
+      operationId: editarParametro
+      summary: Cambiar el valor de un parámetro editable
+      description: |
+        «Parámetro actualizado.». 404 «El parámetro no existe.». 422: «El parámetro «X» es una regla fija del Anexo 3 y no se puede
+        cambiar.» · «El valor de «X» debe ser un número entre A y B.» · «La fecha de inicio del contrato no es válida (AAAA-MM-DD).» ·
+        «Los correos de la DIGSA tienen máximo 500 caracteres.» · «El correo «X» no es válido.» · «Máximo 10 correos.» · «El valor tiene
+        máximo 500 caracteres.».
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosParametro'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExiste'
+        '422':
+          $ref: '#/components/responses/Validacion'
+
+  /api/maestros/puntos:
+    get:
+      tags: [maestros]
+      operationId: listarPuntos
+      summary: Puntos de entrega (ESM, farmacias alternas y nivel central)
+      description: |
+        Filtros opcionales. `texto` busca en nombre, sigla y municipio (sin distinguir mayúsculas). Orden: unidad, fuerza, nombre. Como el
+        monolito, devuelve hasta 2000 filas.
+      security:
+        - sesionGateway: []
+      parameters:
+        - {name: unidad, in: query, required: false, schema: {type: string}}
+        - {name: fuerza, in: query, required: false, schema: {type: string}}
+        - {name: texto, in: query, required: false, schema: {type: string}}
+        - {name: activo, in: query, required: false, schema: {type: boolean}}
+      responses:
+        '200':
+          description: Puntos.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Punto'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+    post:
+      tags: [maestros]
+      operationId: crearPunto
+      summary: Crear un punto
+      description: |
+        201 `{id, mensaje: «Punto creado.»}`. 422 con todos los errores juntos: «Revise el punto: e1; e2; ….» (ver `DatosPunto`), o «Ya
+        existe un punto con ese nombre en esa unidad, o con esa sigla.». Si la fuerza, el municipio o la regional se borra mientras se guarda: 422
+        «La fuerza, el municipio o la regional cambió mientras guardaba. Revise e intente de nuevo.» (el monolito daba 500).
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosPunto'
+      responses:
+        '201':
+          $ref: '#/components/responses/Creado'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '422':
+          $ref: '#/components/responses/Validacion'
+  /api/maestros/puntos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: [maestros]
+      operationId: editarPunto
+      summary: Editar un punto
+      description: «Punto actualizado.». 404 «El punto no existe.». 422 como al crear. `activo` solo cambia por `/estado`.
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosPunto'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExiste'
+        '422':
+          $ref: '#/components/responses/Validacion'
+  /api/maestros/puntos/{id}/estado:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: [maestros]
+      operationId: cambiarEstadoPunto
+      summary: Activar o inactivar un punto
+      description: |
+        «Punto activado.» o «Punto inactivado.». 404 «El punto no existe.». 422 «El punto es el alcance de N usuarios ESM activos:
+        cámbielos antes de inactivarlo.».
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Estado'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExiste'
+        '422':
+          $ref: '#/components/responses/Validacion'
+  /api/maestros/auditores:
+    get:
+      tags: [maestros]
+      operationId: listarAuditores
+      summary: Usuarios con el perfil Auditor, con su rol técnico y municipio base
+      security:
+        - sesionGateway: []
+      responses:
+        '200':
+          description: Auditores (activos primero, por nombre) y los roles técnicos (`reglas/Reparto.ROLES`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListaAuditores'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+  /api/maestros/auditores/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: [maestros]
+      operationId: editarAuditor
+      summary: Rol técnico y municipio base de un auditor
+      description: |
+        «Auditor actualizado.». 404 «El usuario no es auditor.». 422 «Elija el rol: Químico farmacéutico, Regente de farmacia, Auditor en
+        salud, Ingeniero de sistemas, Otro.» · «El municipio base no existe.». Cambiar el rol no recalcula el reparto de visitas ya
+        programadas.
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosAuditor'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExiste'
+        '422':
+          $ref: '#/components/responses/Validacion'
+  /api/maestros/obligaciones:
+    get:
+      tags: [maestros]
+      operationId: listarObligaciones
+      summary: Obligaciones de la minuta del contrato (parte OBL del formulario)
+      security:
+        - sesionGateway: []
+      responses:
+        '200':
+          description: Obligaciones por prestador, orden y código.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Obligacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+    post:
+      tags: [maestros]
+      operationId: crearObligacion
+      summary: Crear una obligación
+      description: |
+        201 `{id, mensaje: «Obligación creada.»}`. 422: «El prestador debe ser el OPL o la farmacia alterna.» · «El código de la obligación
+        empieza por OB- (p. ej. OB-OPL-01).» · «El texto de la obligación debe tener de 10 a 2000 caracteres.» · «La fuente de la
+        obligación tiene máximo 200 caracteres.» · «Ya existe la obligación X.».
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosObligacion'
+      responses:
+        '201':
+          $ref: '#/components/responses/Creado'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '422':
+          $ref: '#/components/responses/Validacion'
+  /api/maestros/obligaciones/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: [maestros]
+      operationId: editarObligacion
+      summary: Editar una obligación
+      description: |
+        «Obligación actualizada.». 404 «La obligación no existe.». 422 como al crear, o «La obligación ya se calificó en visitas: no
+        cambie su código ni su prestador; inactívela y cree otra.».
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosObligacion'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoExiste'
+        '422':
+          $ref: '#/components/responses/Validacion'
+  /api/maestros/opl:
+    get:
+      tags: [maestros]
+      operationId: consultarOpl
+      summary: El operador logístico activo
+      description: |
+        Si no hay uno registrado, `{id: null, nombre: "", nit: "", correos: []}`.
+      security:
+        - sesionGateway: []
+      responses:
+        '200':
+          description: Operador logístico.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Opl'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+    put:
+      tags: [maestros]
+      operationId: guardarOpl
+      summary: Registrar o actualizar el operador logístico (uno solo activo)
+      description: |
+        «Operador logístico actualizado.». 422: «La razón social del operador debe tener de 3 a 200 caracteres.» · «El NIT debe tener de 6
+        a 12 dígitos y, si acaso, el dígito de verificación (900123456-7).» · «el correo «X» no es válido» · «máximo 10 correos» ·
+        «Registre al menos un correo del operador: recibe la notificación previa (Anexo 3 p.9).».
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatosOpl'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '422':
+          $ref: '#/components/responses/Validacion'
+
+components:
+  securitySchemes:
+    sesionGateway:
+      $ref: './comun.yaml#/components/securitySchemes/sesionGateway'
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+  responses:
+    ConMensaje:
+      description: Hecho; el texto para mostrar va en `mensaje`.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Mensaje'
+    Creado:
+      description: Creado. 201 sin cabecera `Location`, igual que el monolito; el `id` va en el cuerpo.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Creado'
+    NoAutenticado:
+      description: Sin sesión o sesión cerrada (`motivo`, ver `seguridad.yaml`).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    SinPermiso:
+      description: «No tiene permiso para esta acción.».
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    NoExiste:
+      description: El recurso no existe (texto de cada operación).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    Validacion:
+      description: Datos no válidos (textos del monolito en cada operación).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+  schemas:
+    # Alias de los comunes: así el código generado los llama Problema y Mensaje.
+    Problema:
+      $ref: './comun.yaml#/components/schemas/Problema'
+    Mensaje:
+      $ref: './comun.yaml#/components/schemas/Mensaje'
+    Creado:
+      type: object
+      required: [id, mensaje]
+      properties:
+        id:
+          type: integer
+          format: int64
+        mensaje:
+          type: string
+    CodigoNombre:
+      type: object
+      required: [codigo, nombre]
+      properties:
+        codigo:
+          type: string
+        nombre:
+          type: string
+    Catalogos:
+      type: object
+      required: [fuerzas, catalogos, regionales, parametros, unidades, modalidades, tiposVisita, departamentos]
+      properties:
+        fuerzas:
+          type: array
+          items:
+            $ref: '#/components/schemas/Fuerza'
+        catalogos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Catalogo'
+        regionales:
+          type: array
+          description: Por nombre.
+          items:
+            $ref: '#/components/schemas/Regional'
+        parametros:
+          type: array
+          description: Editables primero, luego por clave.
+          items:
+            $ref: '#/components/schemas/Parametro'
+        unidades:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodigoNombre'
+        modalidades:
+          type: array
+          items:
+            type: string
+        tiposVisita:
+          type: array
+          items:
+            $ref: '#/components/schemas/TipoVisita'
+        departamentos:
+          type: array
+          description: Por nombre.
+          items:
+            $ref: '#/components/schemas/CodigoNombre'
+    Fuerza:
+      type: object
+      required: [codigo, nombre, correos, activo]
+      properties:
+        codigo:
+          type: string
+        nombre:
+          type: string
+        sanidad:
+          type: [string, 'null']
+        correos:
+          type: array
+          items:
+            type: string
+        activo:
+          type: boolean
+    DatosFuerza:
+      type: object
+      properties:
+        codigo:
+          type: [string, 'null']
+          description: Solo al crear (2 a 5 letras; se pasa a mayúsculas).
+        nombre:
+          type: [string, 'null']
+        sanidad:
+          type: [string, 'null']
+        correos:
+          type: [array, 'null']
+          items:
+            type: string
+        activo:
+          type: [boolean, 'null']
+    Catalogo:
+      type: object
+      required: [codigo, nombre, patron, valores]
+      properties:
+        codigo:
+          type: string
+        nombre:
+          type: string
+        descripcion:
+          type: [string, 'null']
+        patron:
+          type: string
+        valores:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValorCatalogo'
+    ValorCatalogo:
+      type: object
+      required: [id, codigo, descripcion, activo]
+      properties:
+        id:
+          type: integer
+          format: int64
+        codigo:
+          type: string
+        descripcion:
+          type: string
+        activo:
+          type: boolean
+    DatosValor:
+      type: object
+      properties:
+        codigo:
+          type: [string, 'null']
+        descripcion:
+          type: [string, 'null']
+        activo:
+          type: [boolean, 'null']
+    Regional:
+      type: object
+      required: [id, nombre, activo]
+      properties:
+        id:
+          type: integer
+          format: int64
+        nombre:
+          type: string
+        activo:
+          type: boolean
+    DatosRegional:
+      type: object
+      properties:
+        nombre:
+          type: [string, 'null']
+        activo:
+          type: [boolean, 'null']
+    Parametro:
+      type: object
+      required: [clave, editable]
+      properties:
+        clave:
+          type: string
+        valor:
+          type: [string, 'null']
+        descripcion:
+          type: [string, 'null']
+        fuente:
+          type: [string, 'null']
+        editable:
+          type: boolean
+    DatosParametro:
+      type: object
+      properties:
+        valor:
+          type: [string, 'null']
+    TipoVisita:
+      type: object
+      required: [codigo, nombre, aviso]
+      properties:
+        codigo:
+          type: string
+        nombre:
+          type: string
+        unidad:
+          type: [string, 'null']
+        modalidad:
+          type: [string, 'null']
+        aviso:
+          type: string
+          enum: [opl, no-opl, modulo]
+    Punto:
+      type: object
+      required: [id, nombre, unidad, fuerza, correos, exigeQf, activo]
+      properties:
+        id:
+          type: integer
+          format: int64
+        sigla:
+          type: [string, 'null']
+        nombre:
+          type: string
+        unidad:
+          type: string
+        fuerza:
+          type: string
+        modalidad:
+          type: [string, 'null']
+        nit:
+          type: [string, 'null']
+        municipio:
+          type: [string, 'null']
+        municipioNombre:
+          type: [string, 'null']
+        departamento:
+          type: [string, 'null']
+        direccion:
+          type: [string, 'null']
+        nivel:
+          type: [string, 'null']
+        horario:
+          type: [string, 'null']
+        contacto:
+          type: [string, 'null']
+        correos:
+          type: array
+          items:
+            type: string
+        regionalId:
+          type: [integer, 'null']
+          format: int64
+        regional:
+          type: [string, 'null']
+        regionalOpl:
+          type: [string, 'null']
+        llegaDesde:
+          type: [string, 'null']
+        auditorAsignado:
+          type: [integer, 'null']
+          format: int64
+        exigeQf:
+          type: boolean
+        activo:
+          type: boolean
+        fuente:
+          type: [string, 'null']
+    DatosPunto:
+      type: object
+      description: |
+        Errores parciales que se acumulan en «Revise el punto: …»: «el nombre debe tener de 3 a 200 caracteres» · «la unidad debe ser ESM,
+        FA o NC» · «la fuerza no existe o está inactiva» (NC sin fuerza queda «NA») · «falta la modalidad del ESM (Dispensación,
+        Suministro, Consignación o Satélite)» · «el municipio no existe» · «el municipio «se llega desde» no existe» · «la regional no existe
+        o está inactiva» · «el auditor asignado no es un auditor activo» · «X tiene máximo N caracteres» (sigla 30, NIT 20, dirección 200,
+        contacto 150, nivel 40, horario 200) · «el correo «X» no es válido» · «máximo 10 correos». La modalidad solo se guarda en ESM y el
+        NIT solo en FA.
+      properties:
+        sigla:
+          type: [string, 'null']
+        nombre:
+          type: [string, 'null']
+        unidad:
+          type: [string, 'null']
+        fuerza:
+          type: [string, 'null']
+        modalidad:
+          type: [string, 'null']
+        nit:
+          type: [string, 'null']
+        municipio:
+          type: [string, 'null']
+        direccion:
+          type: [string, 'null']
+        nivel:
+          type: [string, 'null']
+        horario:
+          type: [string, 'null']
+        contacto:
+          type: [string, 'null']
+        correos:
+          type: [array, 'null']
+          description: Cada elemento puede traer varios correos separados por coma, punto y coma o espacio.
+          items:
+            type: string
+        regionalId:
+          type: [integer, 'null']
+          format: int64
+        llegaDesde:
+          type: [string, 'null']
+        auditorAsignado:
+          type: [integer, 'null']
+          format: int64
+        exigeQf:
+          type: [boolean, 'null']
+    Estado:
+      type: object
+      required: [activo]
+      properties:
+        activo:
+          type: boolean
+    ListaAuditores:
+      type: object
+      required: [auditores, roles]
+      properties:
+        auditores:
+          type: array
+          items:
+            $ref: '#/components/schemas/Auditor'
+        roles:
+          type: object
+          description: Clave del rol técnico → nombre para mostrar, en el orden de `reglas/Reparto.ROLES`.
+          additionalProperties:
+            type: string
+    Auditor:
+      type: object
+      required: [id, nombre, usuario, activo, rol, rolNombre]
+      properties:
+        id:
+          type: integer
+          format: int64
+        nombre:
+          type: string
+        usuario:
+          type: string
+        documento:
+          type: [string, 'null']
+        activo:
+          type: boolean
+        rol:
+          type: string
+        rolNombre:
+          type: string
+        municipioBase:
+          type: [string, 'null']
+        municipioNombre:
+          type: [string, 'null']
+    DatosAuditor:
+      type: object
+      properties:
+        rol:
+          type: [string, 'null']
+        municipioBase:
+          type: [string, 'null']
+    Obligacion:
+      type: object
+      required: [id, prestador, codigo, texto, activo]
+      properties:
+        id:
+          type: integer
+          format: int64
+        prestador:
+          type: string
+          enum: [opl, fa]
+        codigo:
+          type: string
+        texto:
+          type: string
+        fuente:
+          type: [string, 'null']
+        activo:
+          type: boolean
+    DatosObligacion:
+      type: object
+      properties:
+        prestador:
+          type: [string, 'null']
+        codigo:
+          type: [string, 'null']
+        texto:
+          type: [string, 'null']
+        fuente:
+          type: [string, 'null']
+        activo:
+          type: [boolean, 'null']
+    Opl:
+      type: object
+      required: [nombre, nit, correos]
+      properties:
+        id:
+          type: [integer, 'null']
+          format: int64
+        nombre:
+          type: string
+        nit:
+          type: [string, 'null']
+        correos:
+          type: array
+          items:
+            type: string
+    DatosOpl:
+      type: object
+      properties:
+        nombre:
+          type: [string, 'null']
+        nit:
+          type: [string, 'null']
+        correos:
+          type: [array, 'null']
+          items:
+            type: string

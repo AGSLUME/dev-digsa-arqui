@@ -1,0 +1,281 @@
+asyncapi: 3.0.0
+info:
+  title: LUME · eventos de seguridad
+  version: 0.1.0
+  description: |
+    Eventos que publica el servicio `seguridad` (ADR-006) por su outbox (`librerias/comun`, paquete `eventos`).
+
+    **Topología.**
+    - Exchange `topic` durable `seguridad.eventos`, con routing key = `tipo`.
+    - Cada consumidor tiene su cola quorum, su cola de reintento (TTL + dead-letter) y su DLQ: `Topologia.consumidor(...)` de `comun`.
+    - Claves que se enlazan:
+      - `usuario.#` y `cuenta.#`: copias de usuarios en visitas, reportes y el monolito (S4);
+      - `sesion.#`, `usuario.permisos_cambiados` y `usuario.estado_cambiado`: el gateway.
+
+    **Entrega «al menos una vez».**
+    - El consumidor es idempotente por `id` (`mensajes_procesados`, `ConsumoEventos` de `comun`).
+    - El consumidor valida que `origen` = `seguridad` llegue por `seguridad.eventos`. Si no coincide, el mensaje va a la DLQ.
+
+    **Orden.**
+    - Cada evento de usuario lleva la `version` del agregado.
+    - La copia descarta el evento si `version` es menor o igual a la que ya aplicó.
+    - `datos` es la FOTO COMPLETA del usuario, no un diff. La copia se reemplaza entera, así que los eventos desordenados o repetidos no la dañan.
+    - Carga inicial y conciliación (ADR-005): `GET /interno/usuarios/exportacion` devuelve la misma foto con la misma `version`.
+
+    **Datos personales (Ley 1581).**
+    - La foto lleva `nombre`, `documento` y `correo`.
+    - `documento` es un DATO PERSONAL: va solo porque visitas lo necesita (notificación previa al OPL y pestaña Auditores).
+    - Cada consumidor guarda solo los campos que usa.
+    - Nadie, ni el publicador ni el despachador ni los consumidores, escribe el cuerpo del mensaje en los logs.
+    - La foto no lleva teléfono, hash de contraseña, tokens, intentos ni datos de sesión. Un campo nuevo se pide a la integradora con su justificación.
+
+defaultContentType: application/json
+
+channels:
+  usuario.creado:
+    address: usuario.creado
+    messages:
+      usuarioCreado:
+        $ref: '#/components/messages/EventoUsuario'
+  usuario.actualizado:
+    address: usuario.actualizado
+    description: Datos del usuario (nombre, documento, correo, usuario) o desbloqueo por el administrador.
+    messages:
+      usuarioActualizado:
+        $ref: '#/components/messages/EventoUsuario'
+  usuario.estado_cambiado:
+    address: usuario.estado_cambiado
+    description: Activado o inactivado. Al inactivar, también sale `sesion.cerrada` (motivo `inactivo`) si tenía sesión.
+    messages:
+      usuarioEstadoCambiado:
+        $ref: '#/components/messages/EventoUsuario'
+  usuario.permisos_cambiados:
+    address: usuario.permisos_cambiados
+    description: |
+      Cambiaron sus perfiles, roles adicionales o alcance, o las pantallas o el estado de un rol que tiene asignado (sale uno por usuario
+      del rol). El gateway fuerza el refresco del token y la copia se actualiza, en un solo evento.
+    messages:
+      usuarioPermisosCambiados:
+        $ref: '#/components/messages/EventoUsuario'
+  cuenta.bloqueada:
+    address: cuenta.bloqueada
+    description: Bloqueado 15 minutos por 5 intentos fallidos. El desbloqueo por el administrador sale como `usuario.actualizado`.
+    messages:
+      cuentaBloqueada:
+        $ref: '#/components/messages/EventoUsuario'
+  sesion.cerrada:
+    address: sesion.cerrada
+    description: |
+      Una sesión de LUME se cerró (salida, inactividad, administrador, inactivación, cambio de contraseña, otro ingreso, ...). El gateway
+      cierra su sesión sin esperar a su caché de 30 s. Cada sesión se cierra una sola vez: `version` = 1.
+    messages:
+      sesionCerrada:
+        $ref: '#/components/messages/EventoSesionCerrada'
+
+operations:
+  publicarUsuarioCreado:
+    action: send
+    channel: { $ref: '#/channels/usuario.creado' }
+  publicarUsuarioActualizado:
+    action: send
+    channel: { $ref: '#/channels/usuario.actualizado' }
+  publicarUsuarioEstadoCambiado:
+    action: send
+    channel: { $ref: '#/channels/usuario.estado_cambiado' }
+  publicarUsuarioPermisosCambiados:
+    action: send
+    channel: { $ref: '#/channels/usuario.permisos_cambiados' }
+  publicarCuentaBloqueada:
+    action: send
+    channel: { $ref: '#/channels/cuenta.bloqueada' }
+  publicarSesionCerrada:
+    action: send
+    channel: { $ref: '#/channels/sesion.cerrada' }
+
+components:
+  messages:
+    EventoUsuario:
+      name: EventoUsuario
+      summary: Sobre de ADR-006 con la foto completa del usuario.
+      headers:
+        $ref: '#/components/schemas/Propiedades'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Sobre'
+          - type: object
+            properties:
+              datos:
+                $ref: '#/components/schemas/FotoUsuario'
+      examples:
+        - name: usuarioCreado
+          summary: Auditor nuevo (datos ficticios).
+          payload:
+            id: 0b6f3c1e-7a52-4c3e-9d41-2f1e8a7b9c10
+            tipo: usuario.creado
+            version: 1
+            ocurrido: '2026-11-06T15:04:05.123Z'
+            origen: seguridad
+            traza: 4bf92f3577b34da6a3ce929d0e0e4736
+            datos:
+              uid: 42
+              usuario: auditor.ficticio
+              nombre: Auditor Ficticio Uno
+              documento: '99887766'
+              correo: auditor.ficticio@seguridad.prueba.local
+              activo: true
+              bloqueado: false
+              bloqueadoHasta: null
+              perfiles: [AUDITOR]
+              roles: []
+              pantallas: [INICIO, MIS_VISITAS]
+              alcance: { tipo: equipo, fuerza: null, punto: null, regional: null }
+              asignados: [3]
+        - name: usuarioPermisosCambiados
+          summary: Coordinador al que se le asignó un rol adicional con base DIGSA (datos ficticios).
+          payload:
+            id: 5d0a9e2b-1c3f-4e8a-b7d6-0f9e8d7c6b5a
+            tipo: usuario.permisos_cambiados
+            version: 7
+            ocurrido: '2026-11-06T15:10:00Z'
+            origen: seguridad
+            traza: null
+            datos:
+              uid: 17
+              usuario: coordinador.ficticio
+              nombre: Coordinador Ficticio
+              documento: null
+              correo: coordinador.ficticio@seguridad.prueba.local
+              activo: true
+              bloqueado: false
+              bloqueadoHasta: null
+              perfiles: [COORDINADOR]
+              roles:
+                - { id: 100, base: DIGSA, pantallas: [REPORTES] }
+              pantallas: [INICIO, AGENDA, REPORTES]
+              alcance: { tipo: todo, fuerza: null, punto: null, regional: null }
+              asignados: [2, 100]
+        - name: cuentaBloqueada
+          summary: Bloqueo por intentos fallidos (datos ficticios).
+          payload:
+            id: 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+            tipo: cuenta.bloqueada
+            version: 3
+            ocurrido: '2026-11-06T16:00:00Z'
+            origen: seguridad
+            traza: null
+            datos:
+              uid: 42
+              usuario: auditor.ficticio
+              nombre: Auditor Ficticio Uno
+              documento: '99887766'
+              correo: auditor.ficticio@seguridad.prueba.local
+              activo: true
+              bloqueado: true
+              bloqueadoHasta: '2026-11-06T16:15:00Z'
+              perfiles: [AUDITOR]
+              roles: []
+              pantallas: [INICIO, MIS_VISITAS]
+              alcance: { tipo: equipo, fuerza: null, punto: null, regional: null }
+              asignados: [3]
+    EventoSesionCerrada:
+      name: EventoSesionCerrada
+      headers:
+        $ref: '#/components/schemas/Propiedades'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Sobre'
+          - type: object
+            properties:
+              datos:
+                $ref: '#/components/schemas/SesionCerrada'
+      examples:
+        - name: sesionCerrada
+          payload:
+            id: 1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b
+            tipo: sesion.cerrada
+            version: 1
+            ocurrido: '2026-11-06T17:30:00Z'
+            origen: seguridad
+            traza: null
+            datos:
+              sid: 3c9e1b7a-2d4f-4e6a-9b8c-7d6e5f4a3b2c
+              uid: 42
+              motivo: salida
+
+  schemas:
+    Propiedades:
+      type: object
+      description: Propiedades AMQP del mensaje (no van en el cuerpo).
+      properties:
+        message_id: { type: string, format: uuid, description: Igual a `id` del sobre. }
+        type: { type: string, description: Igual a `tipo`. }
+        app_id: { type: string, const: seguridad }
+        content_type: { type: string, const: application/json }
+        delivery_mode: { type: integer, const: 2, description: Persistente. }
+    Sobre:
+      type: object
+      required: [id, tipo, version, ocurrido, origen, datos]
+      properties:
+        id: { type: string, format: uuid, description: Llave de idempotencia del consumidor. }
+        tipo: { type: string, pattern: '^[a-z_]+(\.[a-z_]+)+$', description: Igual a la routing key. }
+        version: { type: integer, format: int64, description: Versión del agregado; se descarta si es <= la aplicada. }
+        ocurrido: { type: string, format: date-time }
+        origen: { type: string, const: seguridad }
+        traza: { type: [string, 'null'], description: traceId W3C, si lo había. }
+        datos: { type: object }
+    FotoUsuario:
+      type: object
+      required: [uid, usuario, nombre, correo, activo, bloqueado, perfiles, roles, pantallas, alcance, asignados]
+      properties:
+        uid: { type: integer, format: int64, description: El id del usuario, el mismo del monolito. }
+        usuario: { type: string }
+        nombre: { type: string, description: Dato personal. }
+        documento:
+          type: [string, 'null']
+          description: DATO PERSONAL (Ley 1581). Obligatorio para auditores. Guárdelo solo si lo usa; nunca en los logs.
+        correo: { type: string, description: Dato personal. }
+        activo: { type: boolean }
+        bloqueado:
+          type: boolean
+          description: Informativo, al momento del evento. El bloqueo vence solo, sin evento; cuenta `bloqueadoHasta`.
+        bloqueadoHasta: { type: [string, 'null'], format: date-time }
+        perfiles:
+          type: array
+          description: Solo los perfiles directos (nombres de `reglas/Perfil`). La base de un rol adicional nunca da la identidad de ese perfil.
+          items: { type: string }
+        roles:
+          type: array
+          description: Roles adicionales vigentes, por id.
+          items:
+            type: object
+            required: [id, base, pantallas]
+            properties:
+              id: { type: integer }
+              base: { type: string, description: Perfil base (nombre de `reglas/Perfil`). }
+              pantallas: { type: array, items: { type: string } }
+        pantallas:
+          type: array
+          description: Pantallas efectivas (directas más las de los roles), en el orden de `reglas/Pantallas`.
+          items: { type: string }
+        alcance:
+          type: object
+          description: Alcance de datos. `tipo` es el del claim `alcance` del token; los otros campos son los datos guardados en el usuario.
+          required: [tipo]
+          properties:
+            tipo: { type: string, enum: [todo, opl, fuerza, regional, esm, equipo, ninguno] }
+            fuerza: { type: [string, 'null'], enum: [EJC, ARC, FAC, null] }
+            punto: { type: [integer, 'null'], description: Id del punto (ESM) de visitas. }
+            regional: { type: [integer, 'null'], description: Id de la regional de visitas. }
+        asignados:
+          type: array
+          description: Ids asignados en usuarios_perfiles (perfiles base y roles), ordenados.
+          items: { type: integer }
+    SesionCerrada:
+      type: object
+      required: [sid, uid, motivo]
+      properties:
+        sid: { type: string, format: uuid, description: El claim `sid` del token. }
+        uid: { type: integer, format: int64 }
+        motivo:
+          type: string
+          enum: [salida, inactividad, inactivo, clave, cerrada, reemplazada, clave_vencida, cambio_clave, bloqueado]

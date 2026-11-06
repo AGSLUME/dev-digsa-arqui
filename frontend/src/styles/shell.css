@@ -1,0 +1,574 @@
+/*
+ * Shell LUME (src/app/shell): sidebar oscuro, cabecera blanca de 64 px y contenido con padding 32px (16px en celular), con las medidas
+ * de Plantilla.tsx y estilos.css del monolito. Breakpoints de Mantine: xs 36em, sm 48em, md 62em, lg 75em.
+ */
+.lume-shell {
+  --alto-cabecera: 64px;
+  --ancho-sidebar: 250px;
+  display: block;
+  min-height: 100dvh;
+}
+.lume-shell--colapsado {
+  --ancho-sidebar: 68px;
+}
+/* El foco programático (validación, motivo) no queda tapado por la cabecera fija (2.4.11) */
+html:has(.lume-shell) {
+  scroll-padding-top: calc(64px + 8px);
+}
+
+/* Saltar al contenido: visible solo al enfocarlo */
+.lume-saltar {
+  position: absolute;
+  left: 8px;
+  top: -100px;
+  z-index: 300;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--lume-white);
+  color: var(--lume-blue);
+  font-weight: 600;
+  box-shadow: var(--lume-shadow);
+}
+.lume-saltar:focus {
+  top: 8px;
+}
+
+/* ---------- Cabecera ---------- */
+.lume-cabecera {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 100;
+  height: var(--alto-cabecera);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 24px;
+  background: var(--lume-white);
+  border-bottom: 1px solid var(--lume-border);
+}
+.lume-cabecera__izquierda,
+.lume-cabecera__derecha {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.lume-cabecera__derecha {
+  gap: 10px;
+  flex: none;
+}
+.lume-marca {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+.lume-marca__nombre {
+  font-size: 14.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.lume-logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--lume-blue-active);
+  color: var(--lume-white);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+.lume-migas-nav {
+  min-width: 0;
+}
+.lume-migas {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--lume-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* El módulo largo se recorta con puntos suspensivos; la pantalla actual no */
+.lume-migas li {
+  min-width: 3em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+}
+.lume-migas li + li::before {
+  content: '/';
+  content: '/' / '';
+  margin-right: 6px;
+}
+.lume-migas li[aria-current='page'] {
+  flex-shrink: 0;
+  max-width: calc(100% - 3em - 12px);
+  font-weight: 600;
+  color: var(--lume-text);
+}
+.lume-cabecera__dato {
+  font-size: 12.5px;
+  color: var(--lume-neutral-text);
+  white-space: nowrap;
+}
+.lume-usuario {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.lume-avatar {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--lume-blue-active);
+  color: var(--lume-white);
+  display: grid;
+  place-items: center;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.lume-usuario__texto {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 180px;
+  line-height: 1.25;
+}
+.lume-usuario__nombre,
+.lume-usuario__perfiles {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lume-usuario__nombre {
+  font-size: 13px;
+  font-weight: 600;
+}
+.lume-usuario__perfiles {
+  font-size: 11.5px;
+  color: var(--lume-neutral-text);
+}
+.lume-salir {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--lume-blue-active);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.lume-salir:hover {
+  background: var(--lume-info-bg);
+  color: var(--lume-blue);
+}
+.lume-solo-md,
+.lume-solo-lg {
+  display: none;
+}
+@media (min-width: 62em) {
+  .lume-solo-md {
+    display: inline;
+  }
+}
+@media (min-width: 75em) {
+  .lume-solo-lg {
+    display: inline;
+  }
+}
+
+/* ---------- Sidebar ---------- */
+.lume-sidebar {
+  position: fixed;
+  top: var(--alto-cabecera);
+  bottom: 0;
+  left: 0;
+  z-index: 90;
+  width: var(--ancho-sidebar);
+  display: flex;
+  flex-direction: column;
+  background: var(--lume-blue-dark);
+  color: var(--complemento-sidebar-texto);
+}
+.lume-sidebar[hidden] {
+  display: none;
+}
+.lume-sidebar__cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 16px 16px 10px;
+}
+.lume-shell--colapsado .lume-sidebar__cabecera {
+  justify-content: center;
+  padding-inline: 0;
+}
+.lume-sidebar__titulo {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.lume-sidebar__panel {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--lume-white);
+}
+/* #94A3B8: el #64748B de la especificación no llega a 4,5:1 sobre --lume-blue-dark (aprobado 2026-10-27) */
+.lume-sidebar-apagado,
+.lume-seccion {
+  color: var(--complemento-sidebar-apagado);
+}
+.lume-sidebar__titulo .lume-sidebar-apagado {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lume-sidebar-boton {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--complemento-sidebar-texto);
+  cursor: pointer;
+}
+.lume-sidebar-boton:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.lume-sidebar__menu {
+  flex: 1;
+  overflow-y: auto;
+  /* 4 px arriba: el anillo de foco de la primera entrada no se recorta */
+  padding: 4px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lume-sidebar__pie {
+  padding: 0 12px 12px;
+}
+.lume-shell--colapsado :is(.lume-sidebar__menu, .lume-sidebar__pie) {
+  padding-inline: 10px;
+}
+.lume-sidebar__usuario {
+  font-size: 11.5px;
+  padding: 0 12px 4px;
+}
+.lume-seccion {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 14px 12px 6px;
+}
+.lume-separador {
+  height: 1px;
+  margin: 10px 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+/* Entradas: 44 px de objetivo táctil */
+.lume-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--complemento-sidebar-texto);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.lume-shell--colapsado .lume-nav {
+  justify-content: center;
+  padding-inline: 0;
+}
+.lume-nav:hover:not(.lume-nav--activa) {
+  background: rgba(255, 255, 255, 0.06);
+}
+.lume-nav--activa {
+  background: var(--lume-blue-active);
+  color: var(--lume-white);
+}
+.lume-nav__titulo {
+  flex: 1;
+  min-width: 0;
+}
+.lume-nav-numeral {
+  font-size: 11px;
+  color: var(--complemento-sidebar-apagado);
+}
+.lume-nav--activa .lume-nav-numeral {
+  color: var(--lume-white);
+}
+/* Foco visible sobre el sidebar oscuro: blanco (14,6:1); el anillo azul no llega a 3:1 sobre #1E293B ni se ve en la entrada activa */
+.lume-sidebar :focus-visible {
+  outline: 2px solid var(--lume-white) !important;
+  outline-offset: 2px;
+}
+
+/* Ayuda al pasar (sidebar colapsado, campana, sonido) */
+.lume-ayuda {
+  display: block;
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: var(--lume-blue-dark);
+  color: var(--lume-white);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ---------- Contenido ---------- */
+.lume-contenido {
+  display: block;
+  min-height: 100dvh;
+  padding: calc(var(--alto-cabecera) + 32px) 32px 32px calc(var(--ancho-sidebar) + 32px);
+  background: var(--lume-bg);
+  outline: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lume-cargando {
+    animation-duration: 2s;
+  }
+}
+.lume-cargando {
+  width: 28px;
+  height: 28px;
+  margin: 32px auto;
+  border: 3px solid var(--lume-info-bg);
+  border-top-color: var(--lume-blue-active);
+  border-radius: 50%;
+  animation: lume-girar 0.7s linear infinite;
+}
+
+/* ---------- Celular (< 48em): panel del menú a todo el ancho bajo la cabecera ---------- */
+@media (max-width: 47.99em) {
+  .lume-cabecera {
+    padding: 0 16px;
+    gap: 8px;
+  }
+  .lume-cabecera__derecha {
+    gap: 4px;
+  }
+  .lume-sidebar {
+    width: 100%;
+  }
+  .lume-contenido {
+    padding: calc(var(--alto-cabecera) + 16px) 16px 16px;
+  }
+  .lume-hamburguesa {
+    margin-left: -8px;
+  }
+}
+@media (max-width: 35.99em) {
+  .lume-marca__nombre {
+    display: none;
+  }
+}
+
+/* ---------- Páginas ---------- */
+.lume-texto-error {
+  color: var(--lume-danger);
+}
+.lume-texto-pequeno {
+  font-size: 13px;
+}
+.lume-card__seccion {
+  margin: -20px -20px 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--lume-border);
+}
+.lume-rejilla-modulos {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 48em) {
+  .lume-rejilla-modulos {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 75em) {
+  .lume-rejilla-modulos {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.lume-modulo__entradas {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lume-modulo__entrada {
+  justify-content: flex-start;
+  min-height: 44px;
+  width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+.lume-modulo__titulo {
+  flex: 1;
+}
+.lume-modulo__numeral {
+  font-size: 12px;
+  color: var(--lume-neutral-text);
+}
+
+/* Páginas públicas (ingreso, claves, sin conexión): tarjeta centrada */
+.lume-publica {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--lume-bg);
+}
+.lume-publica__tarjeta {
+  width: 100%;
+  max-width: 420px;
+}
+
+/* Avisos de éxito, abajo a la derecha */
+.lume-avisos {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 32px));
+}
+/* La región de avisos existe siempre (vacía no ocupa ni tapa): una región viva que aparece junto con su texto no se anuncia */
+.lume-avisos {
+  pointer-events: none;
+}
+.lume-avisos > * {
+  pointer-events: auto;
+}
+/* Con un aviso a la vista (el persistente puede quedarse), el foco no queda debajo de él al desplazarse (2.4.11) */
+html:has(.lume-avisos .lume-aviso) {
+  scroll-padding-bottom: 140px;
+}
+.lume-aviso {
+  position: relative;
+  padding-right: 40px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.lume-aviso__cerrar {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--lume-neutral-text);
+  cursor: pointer;
+}
+
+/* ---------- Ingreso y claves ---------- */
+.lume-h2 {
+  font-size: 17px;
+  line-height: 1.35;
+  font-weight: 700;
+}
+.lume-h3 {
+  font-size: 15px;
+  line-height: 1.4;
+  font-weight: 700;
+}
+h1.lume-h2,
+h1.lume-h3 {
+  margin: 0;
+}
+.lume-publica__titulo {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.lume-publica__titulo > h1 {
+  min-width: 0;
+  padding-top: 10px;
+}
+.lume-texto-ayuda {
+  font-size: 12px;
+  color: var(--lume-neutral-text);
+}
+/* Botón con aspecto de enlace («Enviar otro código») */
+.lume-enlace {
+  align-self: flex-start;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--lume-blue-active);
+  font: inherit;
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.lume-codigo {
+  display: flex;
+  gap: 8px;
+}
+.lume-codigo__casilla {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 44px;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  text-align: center;
+  font-size: 18px;
+}
+@media (max-width: 23em) {
+  .lume-codigo {
+    gap: 6px;
+  }
+  .lume-codigo__casilla {
+    width: 38px;
+  }
+}
+.lume-codigo__error {
+  margin-top: -8px;
+}
+.lume-turnstile:empty {
+  display: none;
+}
+
+/* Catálogo de componentes (solo desarrollo) */
+.lume-catalogo {
+  display: block;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px 16px;
+}

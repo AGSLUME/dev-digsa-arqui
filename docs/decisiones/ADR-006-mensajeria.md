@@ -14,6 +14,27 @@ Hay flujos asíncronos entre servicios: auditoría (todos → `seguridad`), corr
 - Formato del mensaje: JSON con sobre común `{id, tipo, version, ocurrido, origen, traza, datos}`. Los esquemas de eventos se documentan en `contratos/eventos/*.yaml` (AsyncAPI o JSON Schema) junto a los OpenAPI.
 - Comandos con respuesta inmediata (por ejemplo enviar el código MFA) **no** van por mensajería: son llamadas HTTP síncronas con Resilience4j (ADR-009). La mensajería es para hechos ya ocurridos.
 - **Un usuario de RabbitMQ por servicio**, con escritura solo en su propio exchange. El consumidor valida que `origen` coincida con el exchange del que llega (evita que un servicio publique auditoría en nombre de otro).
+  - Implementado en `infra/rabbitmq/` (2026-11-06): los exchanges `<origen>.eventos` (topic, durable, `alternate-exchange <origen>.sin-ruta`) los declara la infraestructura al arrancar y cada publicador los vuelve a declarar con los mismos argumentos; el consumidor no declara exchanges ajenos, solo sus colas `<servicio>.<cola>` (+ `.reintento`, `.dlq`, `.dlx` propio) y el binding.
+  - **Matriz de lectura por tema** (`set_topic_permissions`): sin ella cualquier servicio podría enlazar `seguridad.eventos` con `#` y recibir las fotos de usuario con documento y correo (Ley 1581; lo detectó seguridad). Todo lo no listado está cerrado:
+
+    | Exchange | Lee | Claves |
+    |---|---|---|
+    | `seguridad.eventos` | gateway | `sesion.*` (`sesion.cerrada`, `sesion.refrescar {uid, motivo, version}`; nunca la foto del usuario) |
+    | `seguridad.eventos` | visitas, reportes | `usuario.*`, `cuenta.*` |
+    | `visitas.eventos` | reportes | `visita.*`, `hallazgo.*`, `punto.*`, `regional.*`, `fuerza.*`, `checklist.*`, `catalogo.*` (proyección y sus maestros) |
+    | `seguridad.eventos` | notificaciones | `usuario.*`, `cuenta.*` (destinatarios de alertas; sin teléfono) |
+    | `reportes.eventos` | notificaciones | `alerta.*` (`reporte_lento`) |
+    | `visitas.eventos` | notificaciones | `alerta.*`, `aviso.*` |
+    | `visitas.eventos` | seguridad | `auditoria.*`, `punto.*`, `regional.*`, `fuerza.*` (copia de maestros) |
+    | `reportes`/`notificaciones.eventos` | seguridad | `auditoria.*` |
+    | `notificaciones.eventos` | visitas | `envio.*` (resultado del envío con su referencia, p. ej. `acta:{id}`; D-N1) |
+
+  - Convención de claves: lo que debe notificarse a una persona sale como `aviso.<tipo>` (p. ej. `aviso.solicitud_nueva`) y lo crítico como `alerta.<tipo>`; la auditoría como `auditoria.<tipo>`. Una clave o un consumidor nuevo se pide a la integradora, que amplía la matriz.
+  - Tope de mensaje 256 KiB (`max_message_size`). TLS de AMQP en el cierre (I9).
+  - **Colas sin ruta y DLQ con datos personales** (Ley 1581): guardan el cuerpo completo del evento (p. ej. la foto de `usuario.*`). Caducan por política del broker en `infra/rabbitmq/definiciones.json`: `<origen>.sin-ruta` a los 7 días y `<servicio>.<cola>.dlq` a los 30 días (tiempo para revisarlas y reprocesar). Solo las leen su servicio dueño (permisos `^X\..+$`) y el administrador del broker; el contenido nunca va a logs. Entran en el inventario de la decisión U-1.
+- **Auditoría por el outbox** (decisión 2026-11-06, a pedido de visitas-a): `PublicadorAuditoria` tiene dos formas y **ninguna se envuelve en un `catch` que trague el error**:
+  - `publicar(evento)`: en la **misma transacción** del cambio. Si el INSERT del outbox falla, la operación falla (no hay cambio sin rastro). Es la forma para auditar lo que sí ocurrió.
+  - `publicarIndependiente(evento)`: en una **transacción propia** (`REQUIRES_NEW`), para auditar lo que fracasa o se deniega (ingreso o captcha fallido, código errado, 403, bloqueo), cuya transacción principal se revierte. Es lo que hacía el monolito con `REQUIRES_NEW`.
 - Los mensajes no llevan secretos en claro (códigos, enlaces, contraseñas) ni datos personales que no se necesiten.
 
 ## Consecuencias

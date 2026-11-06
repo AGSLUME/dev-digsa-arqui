@@ -1,0 +1,35 @@
+server:
+  port: ${HOLA_PUERTO:9109}
+  # X-Forwarded-* solo se aceptan del gateway (ADR-003): RemoteIpValve con proxies internos acotados.
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      internal-proxies: ${LUME_PROXIES_INTERNOS:127\.0\.0\.1|0:0:0:0:0:0:0:1}
+
+spring:
+  application:
+    name: hola
+  threads:
+    virtual:
+      enabled: true
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # El emisor es la URL pública del gateway (ADR-004); las claves se piden por la red interna.
+          issuer-uri: ${LUME_EMISOR:http://localhost:9000}
+          jwk-set-uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}/oauth2/jwks
+          # Audiencia por destinatario (ADR-004, PENDIENTES_I1 bloqueante 3): hola solo acepta tokens dirigidos a él.
+          audiences: hola
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# Logs JSON (ADR-009): fuera de las pruebas se activan con LOGGING_STRUCTURED_FORMAT_CONSOLE=logstash (infra/.env).

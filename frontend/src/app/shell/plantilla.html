@@ -1,0 +1,151 @@
+<!-- Con <base href="/"> el ancla iría a «/#contenido»: el salto se hace aquí, en cualquier ruta -->
+<a class="lume-saltar" href="#contenido" (click)="irAlContenido($event)">Ir al contenido</a>
+
+<header class="lume-cabecera">
+  <div class="lume-cabecera__izquierda">
+    @if (celular()) {
+      <button
+        #hamburguesa
+        type="button"
+        class="lume-icono-boton lume-hamburguesa"
+        aria-label="Menú"
+        aria-controls="menu-lateral"
+        [attr.aria-expanded]="abierto()"
+        (click)="alternarPanel()"
+      >
+        <lume-icono nombre="menu" [tamano]="20" />
+      </button>
+    }
+    <div class="lume-marca">
+      <span class="lume-logo" aria-hidden="true">ID</span>
+      <span class="lume-marca__nombre">Interventoría Integral DIGSA</span>
+    </div>
+    @if (!celular() && migas().length > 0) {
+      <nav aria-label="Ruta" class="lume-migas-nav">
+        <ol class="lume-migas">
+          @for (p of migas(); track p; let ultima = $last) {
+            <li [attr.aria-current]="ultima ? 'page' : null">{{ p }}</li>
+          }
+        </ol>
+      </nav>
+    }
+  </div>
+  <div class="lume-cabecera__derecha">
+    <span class="lume-cabecera__dato lume-solo-lg" data-testid="reloj-cabecera">{{ fechaHora() }} h</span>
+    @if (cuentaRegresiva(); as cuenta) {
+      <span class="lume-cabecera__dato lume-solo-md" data-testid="inactividad-cabecera">Cierre por inactividad en {{ cuenta }}</span>
+    }
+    @if (sesion.puedeEntrar('alertas')) {
+      <a class="lume-icono-boton" routerLink="/alertas" aria-label="Ir a Alertas" lumeAyuda="Alertas">
+        <lume-icono nombre="campana" />
+      </a>
+    }
+    <lume-interruptor-sonido />
+    @if (!celular()) {
+      <div class="lume-usuario">
+        <span class="lume-avatar" aria-hidden="true">{{ iniciales() }}</span>
+        <span class="lume-usuario__texto">
+          <span class="lume-usuario__nombre" data-testid="nombre-usuario">{{ datos().nombre }}</span>
+          <span class="lume-usuario__perfiles" [attr.title]="perfiles()">{{ perfiles() }}</span>
+        </span>
+      </div>
+    }
+    <button type="button" class="lume-salir" (click)="salir()">Salir</button>
+  </div>
+</header>
+
+<nav
+  #panel
+  id="menu-lateral"
+  class="lume-sidebar"
+  aria-label="Módulos"
+  [hidden]="celular() && !abierto()"
+>
+  <div class="lume-sidebar__cabecera">
+    @if (!colapsado()) {
+      <div class="lume-sidebar__titulo">
+        <span class="lume-sidebar__panel">Panel operativo</span>
+        <span class="lume-sidebar-apagado">Interventoría Integral DIGSA</span>
+      </div>
+    }
+    @if (!celular()) {
+      <button
+        type="button"
+        class="lume-sidebar-boton"
+        aria-label="Menú lateral"
+        aria-controls="menu-lateral"
+        [attr.aria-expanded]="!colapsado()"
+        (click)="alternarColapsado()"
+      >
+        <lume-icono [nombre]="colapsado() ? 'expandir-menu' : 'colapsar-menu'" />
+      </button>
+    }
+  </div>
+
+  <div class="lume-sidebar__menu">
+    <lume-entrada-menu ruta="/" titulo="Inicio" [icono]="ICONO_INICIO" [activa]="activa('inicio')" [colapsado]="colapsado()" />
+    @for (g of grupos(); track g.grupo) {
+      <div class="lume-sidebar__grupo">
+        @if (colapsado()) {
+          <div class="lume-separador" aria-hidden="true"></div>
+        } @else {
+          <div class="lume-seccion">{{ g.grupo }}</div>
+        }
+        @for (e of g.entradas; track e.ruta) {
+          <lume-entrada-menu
+            [ruta]="enlace(e.ruta)"
+            [titulo]="e.titulo"
+            [icono]="e.icono"
+            [numeral]="e.numeral"
+            [activa]="activa(e.ruta)"
+            [colapsado]="colapsado()"
+          />
+        }
+      </div>
+    }
+  </div>
+
+  <!-- «Mi cuenta» fija al pie para que «Mi contraseña» no se pierda al desplazar el menú. «Salir» sigue en la cabecera -->
+  <div class="lume-sidebar__pie">
+    @if (colapsado()) {
+      <div class="lume-separador" aria-hidden="true"></div>
+    } @else {
+      <div class="lume-seccion">{{ GRUPO_CUENTA }}</div>
+    }
+    @if (celular()) {
+      <p class="lume-sidebar-apagado lume-sidebar__usuario">{{ datos().nombre }} · {{ perfiles() }}</p>
+    }
+    <button
+      type="button"
+      class="lume-nav"
+      [attr.aria-label]="colapsado() ? 'Mi contraseña' : null"
+      [lumeAyuda]="colapsado() ? 'Mi contraseña' : ''"
+      posicion="derecha"
+      (click)="abrirClave()"
+    >
+      <lume-icono nombre="llave" />
+      @if (!colapsado()) {
+        <span class="lume-nav__titulo">Mi contraseña</span>
+      }
+    </button>
+  </div>
+</nav>
+
+<!-- Con el panel del celular abierto, lo de atrás queda inerte: el foco no cae en controles tapados (2.4.11) -->
+<main #contenido id="contenido" class="lume-contenido" tabindex="-1" [attr.inert]="panelEncima() ? '' : null" [attr.aria-busy]="cargando() || null">
+  <!-- Región viva que existe siempre (una que aparece junto con su texto no se anuncia) -->
+  <div class="lume-solo-lector" role="status" [attr.aria-label]="cargando() ? 'Cargando la pantalla' : null">
+    @if (cargando()) {
+      Cargando la pantalla…
+    }
+  </div>
+  @if (cargando()) {
+    <div class="lume-cargando" aria-hidden="true"></div>
+  }
+  <router-outlet />
+</main>
+
+<lume-aviso-inactividad [minutos]="datos().minutosInactividad" />
+<lume-modal [abierto]="claveAbierta()" titulo="Cambiar mi contraseña" (cerrar)="cerrarClave()">
+  <ng-template lumeCuerpoModal><lume-cambiar-mi-clave (listo)="cerrarClave()" /></ng-template>
+</lume-modal>

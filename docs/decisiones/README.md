@@ -16,3 +16,5 @@ Fase I0 de la integradora. Cada ADR ocupa una página. Estado: **Aceptados** por
 | [010](ADR-010-puertos-entorno-local.md) | Puertos | Tabla base + desfase por sesión, verificada sin choques |
 | [011](ADR-011-frontend-angular.md) | Frontend | Angular LTS standalone, design system LUME como tokens CSS, e2e Playwright portados |
 | [012](ADR-012-versiones-cadena-suministro.md) | Versiones | Java 21, Spring Boot 4.x vigente, imágenes oficiales con digest, versiones exactas |
+| [013](ADR-013-libreria-componentes.md) | Componentes | Solo Angular CDK + componentes LUME propios, ni Material ni PrimeNG (usuario, 2026-11-05) |
+| [014](ADR-014-flujo-ingreso.md) | Ingreso | Pantalla Angular `/ingreso` + `/api/auth/*` como el monolito; termina en `/oauth2/authorize` con `continuar`; salir por `/bff/salir` |

@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- ADR-012: Spring Boot 4.1.x (soporte OSS hasta 2027-07-31) + Spring Cloud 2025.1.x (compatible con Boot >=4.0.0 <4.2.0-M1, según start.spring.io). -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.2</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>co.com.agsamericas.digsa</groupId>
+    <artifactId>lume-padre</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>LUME · padre</name>
+    <description>Monorepo de la migración de LUME (Suite DIGSA) a microservicios (ADR-001).</description>
+
+    <modules>
+        <module>librerias/reglas</module>
+        <module>librerias/comun</module>
+        <module>servicios/gateway</module>
+        <module>servicios/seguridad</module>
+        <module>servicios/visitas</module>
+        <module>servicios/hola</module>
+    </modules>
+
+    <properties>
+        <java.version>21</java.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <spring-cloud.version>2025.1.4</spring-cloud.version>
+        <!-- ADR-007: interfaces Spring generadas desde contratos/. Maven Central, 2026-10-06, firmado (PGP); pom SHA-1 93b06e5b. -->
+        <openapi-generator.version>7.26.0</openapi-generator.version>
+        <!-- Archivos (comun: ValidadorArchivos y fotos), pedido de visitas-a (D3). Verificadas 2026-11-06 en Central: SHA-1, firma .asc,
+             sin CVE en OSV. Misma línea que el monolito (tika 3.2.3, metadata-extractor 2.19.0). Solo tika-core (detección por contenido). -->
+        <tika.version>3.3.3</tika.version>
+        <metadata-extractor.version>2.22.0</metadata-extractor.version>
+        <!-- Acta PDF, QR del OPL y Excel, pedido de visitas-b (D-T3) y compartido con seguridad (S3, logs). Verificadas 2026-11-06 en
+             Central: SHA-1, firma .asc y sin CVE en OSV (también xmlbeans 5.3.0 y commons-compress 1.28.0). Misma línea que el monolito.
+             OpenPDF 2.0.x conserva el paquete com.lowagie; sus dependencias BouncyCastle, icu4j y fop son opcionales y no entran. -->
+        <openpdf.version>2.0.5</openpdf.version>
+        <zxing.version>3.5.4</zxing.version>
+        <poi.version>5.5.1</poi.version>
+        <lume.version>${project.version}</lume.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tika</groupId>
+                <artifactId>tika-core</artifactId>
+                <version>${tika.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.drewnoakes</groupId>
+                <artifactId>metadata-extractor</artifactId>
+                <version>${metadata-extractor.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.librepdf</groupId>
+                <artifactId>openpdf</artifactId>
+                <version>${openpdf.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.zxing</groupId>
+                <artifactId>core</artifactId>
+                <version>${zxing.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.poi</groupId>
+                <artifactId>poi</artifactId>
+                <version>${poi.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.poi</groupId>
+                <artifactId>poi-ooxml</artifactId>
+                <version>${poi.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>co.com.agsamericas.digsa</groupId>
+                <artifactId>lume-reglas</artifactId>
+                <version>${lume.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>co.com.agsamericas.digsa</groupId>
+                <artifactId>lume-comun</artifactId>
+                <version>${lume.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.openapitools</groupId>
+                    <artifactId>openapi-generator-maven-plugin</artifactId>
+                    <version>${openapi-generator.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <configuration>
+                        <release>${java.version}</release>
+                        <parameters>true</parameters>
+                        <compilerArgs>
+                            <arg>-Xlint:all,-processing,-serial</arg>
+                        </compilerArgs>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <configuration>
+                        <!-- Pruebas con zona y locale fijos: las reglas de fechas y festivos no dependen del equipo. -->
+                        <argLine>-Duser.timezone=America/Bogota -Duser.language=es -Duser.country=CO -Dfile.encoding=UTF-8</argLine>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>versiones-minimas</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <requireJavaVersion>
+                                    <version>[21,22)</version>
+                                </requireJavaVersion>
+                                <requireMavenVersion>
+                                    <version>[3.9.16,4)</version>
+                                </requireMavenVersion>
+                                <dependencyConvergence/>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

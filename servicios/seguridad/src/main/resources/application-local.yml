@@ -1,0 +1,28 @@
+# Solo en local (SPRING_PROFILES_ACTIVE=local, lo pone infra/arrancar.sh). Nunca en otro entorno.
+lume:
+  contrasenas:
+    # El secreto del cliente gateway que genera infra/generar-env.sh va como {noop}: solo se reconoce en local.
+    permitir-noop: true
+  captcha:
+    # Sin claves de Turnstile, el captcha se da por superado (como el monolito en local). Con las claves de prueba públicas de Cloudflare
+    # en el .env (LUME_TURNSTILE_*), se verifica de verdad.
+    permitir-sin-clave: true
+  correo:
+    # D2: el adaptador provisional solo envía a los ficticios de la sesión (ADR-010: @<sesion>.prueba.local), al Mailpit ya instalado.
+    dominio-permitido: ${LUME_DOMINIO_PRUEBA}
+
+spring:
+  security:
+    oauth2:
+      authorizationserver:
+        client:
+          # Cliente del humo de punta a punta (client_credentials): solo existe en local.
+          humo:
+            registration:
+              client-id: humo
+              client-secret: ${LUME_HUMO_SECRETO_CODIFICADO}
+              client-authentication-methods: client_secret_basic
+              authorization-grant-types: client_credentials
+              scopes: hola:humo
+            token:
+              access-token-time-to-live: 5m

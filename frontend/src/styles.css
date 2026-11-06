@@ -1,0 +1,11 @@
+/* Estilos globales de LUME (ADR-011, ADR-013). Inter alojada en la aplicación, sin CDN, con los pesos del monolito. */
+@import '@fontsource/inter/latin-400.css';
+@import '@fontsource/inter/latin-500.css';
+@import '@fontsource/inter/latin-600.css';
+@import '@fontsource/inter/latin-700.css';
+/* Estructura de los overlays del CDK (posición del diálogo y del fondo); sin estilos visuales */
+@import '@angular/cdk/overlay-prebuilt.css';
+@import './styles/lume.css';
+@import './styles/complementos.css';
+@import './styles/componentes.css';
+@import './styles/shell.css';

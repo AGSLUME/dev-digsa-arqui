@@ -1,0 +1,15 @@
+/*
+ * Colores que la especificación LUME usa en sus componentes sin ser tokens (sidebar, tablas, bordes de alerta). No se agregan otros.
+ * Los mismos valores que COMPLEMENTOS en src/app/ui/tema.ts (tema.spec.ts lo comprueba).
+ */
+:root {
+  --complemento-sidebar-texto: #CBD5E1;
+  --complemento-sidebar-apagado: #94A3B8;
+  --complemento-encabezado-tabla: #FAFBFC;
+  --complemento-fila-hover: #F8FAFC;
+  --complemento-primario-deshabilitado: #93C5FD;
+  --complemento-borde-alerta-warning: #E3CDA3;
+  --complemento-borde-alerta-info: #BFDBFE;
+  --complemento-borde-alerta-success: #BEDBC6;
+  --complemento-borde-alerta-danger: #E3C3C3;
+}

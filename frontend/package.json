@@ -1,0 +1,50 @@
+{
+  "name": "frontend",
+  "version": "0.0.0",
+  "scripts": {
+    "ng": "ng",
+    "api": "node scripts/generar-api.mjs",
+    "prestart": "npm run api",
+    "start": "ng serve",
+    "prebuild": "npm run api",
+    "build": "ng build",
+    "watch": "ng build --watch --configuration development",
+    "pretest": "npm run api",
+    "test": "ng test",
+    "test:mock": "node --test mock/servidor.test.mjs mock/usuarios.test.mjs mock/logs.test.mjs",
+    "lint": "ng lint"
+  },
+  "private": true,
+  "packageManager": "npm@11.17.0",
+  "dependencies": {
+    "@angular/cdk": "21.2.14",
+    "@angular/common": "21.2.26",
+    "@angular/compiler": "21.2.26",
+    "@angular/core": "21.2.26",
+    "@angular/forms": "21.2.26",
+    "@angular/platform-browser": "21.2.26",
+    "@angular/router": "21.2.26",
+    "@fontsource/inter": "5.3.0",
+    "rxjs": "7.8.2",
+    "tslib": "2.9.1"
+  },
+  "devDependencies": {
+    "@angular/build": "21.2.29",
+    "@angular/cli": "21.2.29",
+    "@angular/compiler-cli": "21.2.26",
+    "@openapitools/openapi-generator-cli": "2.42.0",
+    "angular-eslint": "21.4.0",
+    "eslint": "10.13.0",
+    "jsdom": "28.1.0",
+    "prettier": "3.9.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.0",
+    "vitest": "4.1.12"
+  },
+  "engines": {
+    "node": ">=24.19.0 <25"
+  },
+  "overrides": {
+    "basic-ftp": "6.2.3"
+  }
+}

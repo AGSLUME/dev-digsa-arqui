@@ -1,0 +1,148 @@
+server:
+  port: ${GATEWAY_PUERTO:9000}
+
+lume:
+  # true detrás de HTTPS (cookies Secure). En local va por http://localhost.
+  # Falla cerrado: sin la variable, las cookies van con Secure. Solo el .env local la pone en false.
+  url-segura: ${LUME_URL_SEGURA:true}
+
+spring:
+  application:
+    name: gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PUERTO:6380}
+      username: ${REDIS_USUARIO_GATEWAY:gateway}
+      password: ${REDIS_CLAVE_GATEWAY:}
+  session:
+    # La inactividad la mide FiltroSesionLume con los minutos de seguridad (parámetro del administrador, 1 a 480; ADR-004). Esta es solo
+    # la vida máxima en Redis de una sesión abandonada: 480 + 5 minutos, como el (minutos + 5) del monolito.
+    timeout: ${LUME_MINUTOS_SESION_REDIS:485}m
+    data:
+      redis:
+        # Debe quedar bajo "lume:*": es el único prefijo que la ACL de Redis permite al usuario gateway (ADR-009).
+        namespace: lume:gateway:sesion
+  security:
+    oauth2:
+      client:
+        registration:
+          lume:
+            provider: lume
+            client-id: gateway
+            client-secret: ${LUME_GATEWAY_SECRETO:}
+            client-authentication-method: client_secret_basic
+            authorization-grant-type: authorization_code
+            redirect-uri: "{baseUrl}/bff/login/oauth2/code/{registrationId}"
+            scope: openid,profile
+          # Token de máquina del propio gateway para /interno/sesiones de seguridad (estado, actividad, cierre; ADR-004).
+          lume-interno:
+            provider: lume
+            client-id: gateway
+            client-secret: ${LUME_GATEWAY_SECRETO:}
+            client-authentication-method: client_secret_basic
+            authorization-grant-type: client_credentials
+            scope: seguridad:sesiones
+        provider:
+          lume:
+            # El navegador va al emisor por la URL pública (el propio gateway); el gateway habla con seguridad por la red interna.
+            authorization-uri: ${LUME_EMISOR:http://localhost:9000}/oauth2/authorize
+            token-uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}/oauth2/token
+            jwk-set-uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}/oauth2/jwks
+            user-info-uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}/userinfo
+            user-name-attribute: sub
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # Solo se añaden X-Forwarded-* (que el emisor usa para armar URLs con el host público) si la petición llega de un proxy
+          # confiable. En local es el propio equipo; en el cierre, solo el ingress (ADR-003: la IP del cliente no se falsifica).
+          trusted-proxies: ${LUME_PROXIES_CONFIABLES:127\.0\.0\.1|0:0:0:0:0:0:0:1}
+          x-forwarded:
+            # El gateway FIJA X-Forwarded-For con la IP que él ve; no añade a lo que mande el cliente (ADR-003).
+            for-append: false
+          routes:
+            # Emisor OIDC (seguridad). Va sin TokenRelay: el navegador inicia sesión allí. Solo viaja la cookie LUME_IDP (ADR-014).
+            # Al público solo lo que usa el navegador (revisión de seguridad, M4): autorizar, la JWKS y el descubrimiento. Con límite por
+            # IP: cada /oauth2/authorize anónimo crea una sesión del emisor en base.
+            - id: seguridad-emisor
+              uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}
+              predicates:
+                - Path=/oauth2/authorize,/oauth2/jwks,/.well-known/**
+              filters:
+                - SoloCookieEmisor=
+                - LimiteIngreso=
+            # Token, introspección, revocación, device, userinfo y logout del emisor: solo por la red interna (el gateway los usa por
+            # LUME_SEGURIDAD_URL). Desde afuera, 404.
+            - id: seguridad-emisor-interno
+              uri: no://op
+              predicates:
+                - Path=/oauth2/**,/userinfo,/connect/**
+              filters:
+                - SetStatus=404
+            # Ingreso (ADR-014): público, con CSRF (cadena del gateway) y límite de tasa por IP y por usuario. Sin TokenRelay; solo LUME_IDP.
+            - id: seguridad-ingreso
+              uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}
+              predicates:
+                - Path=/api/auth/**
+              filters:
+                - RemoveRequestHeader=Authorization
+                - SoloCookieEmisor=
+                - LimiteIngreso=
+            # Sesión y cuenta propia (seguridad), con el token del usuario.
+            - id: seguridad-api
+              uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}
+              predicates:
+                - Path=/api/sesion,/api/sesion/**,/api/cuenta/**
+              filters:
+                - TokenRelay=
+                - RemoveRequestHeader=Cookie
+                - RemoveResponseHeader=Set-Cookie
+            # visitas (ADR-002): paquetes de visitas-a. Las rutas de visitas-b se agregan aquí cuando existan.
+            - id: visitas
+              uri: ${LUME_VISITAS_URL:http://localhost:9102}
+              predicates:
+                - Path=/api/catalogos,/api/catalogos/**,/api/maestros,/api/maestros/**,/api/agenda,/api/agenda/**,/api/calendario,/api/calendario/**,/api/mis-visitas,/api/mis-visitas/**,/api/solicitudes,/api/solicitudes/**,/api/propuesta,/api/propuesta/**
+              filters:
+                - TokenRelay=
+                - RemoveRequestHeader=Cookie
+                # Un servicio no pone cookies en el origen del BFF (pisarían XSRF-TOKEN o la sesión).
+                - RemoveResponseHeader=Set-Cookie
+            - id: hola
+              uri: ${LUME_HOLA_URL:http://localhost:9109}
+              predicates:
+                - Path=/api/hola/**
+              filters:
+                - TokenRelay=
+                - RemoveRequestHeader=Cookie
+                # Un servicio o el monolito no pone cookies en el origen del BFF (pisarían XSRF-TOKEN o la sesión).
+                - RemoveResponseHeader=Set-Cookie
+            # Convivencia (ADR-008): analítica y presupuesto siguen en el monolito y reciben el mismo token.
+            - id: monolito
+              uri: ${DIGSA_MONOLITO_URL:http://localhost:9050}
+              predicates:
+                - Path=/api/analitica/**,/api/homologacion/**,/api/presupuesto/**
+              filters:
+                - TokenRelay=
+                - RemoveRequestHeader=Cookie
+                # Un servicio o el monolito no pone cookies en el origen del BFF (pisarían XSRF-TOKEN o la sesión).
+                - RemoveResponseHeader=Set-Cookie
+            # Angular (en local, ng serve). Va de último.
+            - id: frontend
+              uri: ${LUME_FRONTEND_URL:http://localhost:4200}
+              order: 1000
+              predicates:
+                - Path=/**
+              filters:
+                # Los archivos de la SPA no necesitan cookies: LUME_SESION y LUME_IDP no salen hacia el servidor de Angular (revisión B-f)
+                - RemoveRequestHeader=Cookie
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
