@@ -1,17 +1,20 @@
 // Mock del gateway + servicio `seguridad` para desarrollar y probar el frontend sin backend (ADR-007, ADR-014).
-// Sigue contratos/seguridad.yaml (0.1.0) y el comportamiento del monolito (identidad/ y reglas/ de digsa-java). Sin dependencias: Node 24.
+// Sigue contratos/seguridad.yaml (0.5.0: /api/usuarios/** en mock/usuarios.mjs y /api/logs/** en mock/logs.mjs) y el comportamiento del monolito (identidad/ y reglas/ de digsa-java). Sin dependencias: Node 24.
 //
 //   node mock/servidor.mjs            # 127.0.0.1:9200 (el puerto del gateway de la sesión angular, ADR-010)
 //
 // Variables: DIGSA_MOCK_PUERTO, DIGSA_MOCK_MINUTOS (inactividad, 10), DIGSA_MOCK_CODIGOS_POR_HORA (5), DIGSA_MOCK_URL_PUBLICA
 // (http://localhost:4220, para los enlaces del correo), DIGSA_MOCK_TURNSTILE (clave de sitio; por omisión la de PRUEBA pública de
-// Cloudflare que siempre aprueba; «no» = captcha desactivado). Los correos (código MFA, enlaces) van al Mailpit ya instalado.
+// Cloudflare que siempre aprueba; «no» = captcha desactivado), DIGSA_MOCK_DOMINIOS_REPORTES (dominios a los que se envían los logs,
+// separados por coma; angular.prueba.local) y DIGSA_MOCK_CORREO_REPORTES (correo sugerido). Los correos van al Mailpit ya instalado.
 //
 // Solo para desarrollo y e2e: guarda todo en memoria, escucha solo en 127.0.0.1 y no tiene ningún secreto.
 import { randomBytes, randomInt } from 'node:crypto';
 import { createServer } from 'node:http';
 import { enviarCorreo } from './correo.mjs';
-import { permitidas, usuariosIniciales } from './datos.mjs';
+import { PERFILES, permitidas, usuariosIniciales } from './datos.mjs';
+import { crearBitacora, crearRutasLogs } from './logs.mjs';
+import { bogota, crearRutasUsuarios, nombresAsignados } from './usuarios.mjs';
 
 const PUERTO = Number(process.env.DIGSA_MOCK_PUERTO ?? 9200);
 const URL_PUBLICA = process.env.DIGSA_MOCK_URL_PUBLICA ?? 'http://localhost:4220';
@@ -41,6 +44,13 @@ function reiniciar() {
   estado = {
     minutos: Number(process.env.DIGSA_MOCK_MINUTOS ?? 10),
     usuarios: usuariosIniciales(),
+    /** Perfiles base (el nombre visible se puede cambiar) y roles adicionales (Anexo 5, 1.12), desde el id 101. */
+    perfiles: PERFILES.map((p) => ({ ...p })),
+    roles: [],
+    siguienteRol: 101,
+    /** Bitácora (Logs del sistema): eventos de negocio, en memoria. */
+    bitacora: [],
+    siguienteLog: 0,
     /** Sesión del emisor y, después del canje, también del gateway: un mismo objeto (sid). */
     sesiones: new Map(),
     /** usuarioId → id de la sesión vigente (sesión única, decisión 7.1). */
@@ -118,6 +128,12 @@ class Respuesta {
       'application/problem+json',
     );
   }
+  /** Un archivo adjunto (la descarga de los logs). */
+  archivo({ nombre, tipo, contenido }) {
+    this.res
+      .writeHead(200, { 'Cache-Control': 'no-store', 'Content-Type': tipo, 'Content-Disposition': `attachment; filename="${nombre}"`, 'Content-Length': contenido.length })
+      .end(contenido);
+  }
   redirigir(destino) {
     const cabeceras = { Location: destino, 'Cache-Control': 'no-store' };
     if (this.galletas.length) cabeceras['Set-Cookie'] = this.galletas;
@@ -140,6 +156,8 @@ async function leerCuerpo(req) {
 function sembrarCsrf(r) {
   r.galleta(cookie('XSRF-TOKEN', token(16), { httpOnly: false }));
 }
+
+const bitacora = crearBitacora(() => estado);
 
 // ---------- Sesiones ----------
 function sesionDelEmisor(req, r, crear = false) {
@@ -199,7 +217,7 @@ async function enviarCodigo(u, r) {
   return true;
 }
 
-async function enviarEnlace(u, asunto) {
+async function enviarEnlace(u, asunto, intro = 'Para definir su contraseña abra este enlace.') {
   const tkn = token(32);
   for (const [k, e] of estado.enlaces) if (e.usuarioId === u.id) estado.enlaces.delete(k);
   estado.enlaces.set(tkn, { usuarioId: u.id, vence: ahora() + 60 * MIN, usado: false });
@@ -207,7 +225,7 @@ async function enviarEnlace(u, asunto) {
   await enviarCorreo({
     para: u.correo,
     asunto,
-    texto: `Hola ${u.nombre}.\n\nPara definir su contraseña abra este enlace (vence en 60 minutos y sirve una sola vez):\n${URL_PUBLICA}/definir-clave?tkn=${tkn}`,
+    texto: `Hola ${u.nombre}.\n\n${intro} Vence en 60 minutos y sirve una sola vez:\n${URL_PUBLICA}/definir-clave?tkn=${tkn}`,
   });
 }
 
@@ -241,14 +259,14 @@ function filtroSesion(req, r, renovar) {
 }
 
 function datosSesion(u) {
-  const p = permitidas(u.perfiles);
+  const p = permitidas(u.perfiles, estado.roles);
   return {
     id: u.id,
     usuario: u.usuario,
     nombre: u.nombre,
-    perfiles: [...u.perfiles].sort(),
-    menu: p.filter(([, , , , oculta]) => !oculta).map(([ruta, titulo, grupo]) => ({ ruta, titulo, grupo })),
-    pantallas: p.map(([ruta]) => ruta),
+    perfiles: nombresAsignados(u.perfiles, estado.perfiles, estado.roles).sort(),
+    menu: p.filter((x) => !x.oculta).map(({ ruta, titulo, grupo }) => ({ ruta, titulo, grupo })),
+    pantallas: p.map((x) => x.ruta),
     minutosInactividad: estado.minutos,
   };
 }
@@ -275,6 +293,7 @@ const rutas = {
     s.gateway = true;
     s.ultimo = ahora();
     estado.huellas.set(s.usuarioId, s.id);
+    usuarioDe(s.usuarioId).ultimoIngreso = bogota(ahora());
     r.galleta(cookie('LUME_SESION', s.id));
     sembrarCsrf(r);
     r.redirigir('/');
@@ -284,6 +303,7 @@ const rutas = {
     for (const id of [c.LUME_SESION, c.MOCK_IDP]) {
       const s = estado.sesiones.get(id);
       if (s) {
+        if (s.gateway && s.usuarioId && !s.cerrada) bitacora.registrar('logout', 'Salida', { quien: usuarioDe(s.usuarioId), modulo: 'auth' });
         cerrar(s, 'cerrada');
         estado.sesiones.delete(id);
       }
@@ -348,6 +368,7 @@ const rutas = {
       return r.problema(422, c.intentos >= 5 ? agotado : 'El código no es correcto. Revise el último correo que le enviamos.');
     }
     c.usado = true;
+    bitacora.registrar('login', `Ingreso de ${u.usuario}`, { quien: u, modulo: 'auth' });
     s.usuarioId = u.id;
     s.autenticada = true;
     s.paso = null;
@@ -462,8 +483,8 @@ const rutas = {
     r.json({ minutos: estado.minutos });
   },
   /**
-   * Crea un usuario de prueba (lo que en el monolito hace POST /api/usuarios, que llega con el contrato de usuarios). Con `claveInicial`
-   * el primer ingreso pide cambiarla. El correo es siempre @angular.prueba.local.
+   * Crea un usuario de prueba sin pasar por la pantalla (atajo de las e2e; la pantalla usa POST /api/usuarios). Perfiles por nombre
+   * («Administrador», «Auditor»…) o por id. Con `claveInicial` el primer ingreso pide cambiarla. El correo es siempre @angular.prueba.local.
    */
   'POST /__mock/usuarios': (_req, r, b) => {
     const usuario = normal(b.usuario);
@@ -473,7 +494,16 @@ const rutas = {
       id,
       usuario,
       nombre: String(b.nombre ?? 'Usuario de Prueba'),
-      perfiles: Array.isArray(b.perfiles) && b.perfiles.length ? b.perfiles.map(String) : ['Auditor'],
+      perfiles: (Array.isArray(b.perfiles) && b.perfiles.length ? b.perfiles : ['Auditor']).map((p) =>
+        typeof p === 'number' ? p : (estado.perfiles.find((x) => x.codigo === p) ?? estado.roles.find((x) => x.nombre === p))?.id,
+      ),
+      documento: b.documento ?? null,
+      telefono: null,
+      alcanceFuerza: null,
+      alcancePunto: null,
+      alcanceRegional: null,
+      ultimoIngreso: null,
+      definir: false,
       clave: String(b.claveInicial ?? b.clave ?? ''),
       claveInicial: b.claveInicial != null,
       correo: `${usuario}@angular.prueba.local`,
@@ -481,6 +511,7 @@ const rutas = {
       intentos: 0,
       bloqueadoHasta: 0,
     };
+    if (nuevo.perfiles.some((p) => p === undefined)) return r.problema(422, 'Hay un perfil no válido.', { campo: 'perfiles' });
     estado.usuarios.push(nuevo);
     r.enviar(201, { id, usuario, correo: nuevo.correo });
   },
@@ -492,6 +523,27 @@ const rutas = {
     r.enviar(s ? 204 : 404);
   },
 };
+
+const rutaUsuarios = crearRutasUsuarios({
+  estado: () => estado,
+  filtroSesion,
+  sesionAbierta,
+  bloqueado,
+  cerrar,
+  enviarEnlace,
+  errorPolitica,
+  usuarioDe,
+  bitacora,
+});
+
+const rutaLogs = crearRutasLogs({
+  estado: () => estado,
+  filtroSesion,
+  bitacora,
+  enviarCorreo,
+  enmascarar,
+  dominios: (process.env.DIGSA_MOCK_DOMINIOS_REPORTES ?? 'angular.prueba.local').split(',').map((d) => d.trim()).filter(Boolean),
+});
 
 const ESCRITURA = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -509,7 +561,7 @@ const servidor = createServer(async (req, res) => {
   if (!hostLocal(req.headers.host)) return r.problema(403, 'No tiene permiso para esta acción.');
   const camino = new URL(req.url, 'http://x').pathname;
   try {
-    const manejador = rutas[`${req.method} ${camino}`];
+    const manejador = rutas[`${req.method} ${camino}`] ?? rutaUsuarios(req.method, camino) ?? rutaLogs(req.method, camino);
     if (!manejador) {
       if (camino === '/api/sesion/mantener') return r.problema(405, 'Método no permitido.');
       return r.problema(404, 'No existe.');

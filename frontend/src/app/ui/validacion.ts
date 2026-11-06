@@ -41,8 +41,11 @@ import { Sonido } from './sonido';
 export type Errores = Record<string, string | null | undefined>;
 
 export interface OpcionesValidacion {
-  /** Nombre visible de cada campo para el resumen («Teléfono»); sin etiqueta se usa el nombre del campo. */
-  etiquetas?: Record<string, string>;
+  /**
+   * Nombre visible de cada campo para el resumen («Teléfono»); sin etiqueta se usa el nombre del campo. Una función si depende de los
+   * datos (p. ej. el nombre vigente de cada perfil).
+   */
+  etiquetas?: Record<string, string> | (() => Record<string, string>);
   /** Campo del servidor (nombre en el cuerpo de la petición) → campo del formulario, cuando difieren; una función si depende del paso. */
   campos?: Record<string, string> | (() => Record<string, string>);
   /** data-testid del resumen; cada pantalla conserva el que ya usan sus pruebas (p. ej. «error-ingreso»). */
@@ -112,7 +115,8 @@ export class Validacion {
     this.errores.set(conMensaje);
     this.marcado.set(null);
     this.general.set(null);
-    const nombres = Object.keys(conMensaje).map((c) => this.opciones.etiquetas[c] ?? c);
+    const etiquetas = this.etiquetas();
+    const nombres = Object.keys(conMensaje).map((c) => etiquetas[c] ?? c);
     if (nombres.length === 0) return true;
     this.fijo.set({ titulo: nombres.length === 1 ? `Revise el campo marcado: ${nombres[0]}` : `Revise los ${nombres.length} campos marcados`, nombres });
     this.avisar('campo');
@@ -122,7 +126,7 @@ export class Validacion {
   /** Error de una petición: el mensaje va al resumen y, si el servidor dice el campo (`campo` del 422), el campo queda marcado. */
   errorServidor(e: unknown, texto: string): void {
     const delServidor = e instanceof ErrorApi ? (e.campo ?? null) : null;
-    const { etiquetas } = this.opciones;
+    const etiquetas = this.etiquetas();
     const campos = typeof this.opciones.campos === 'function' ? this.opciones.campos() : this.opciones.campos;
     const campo = delServidor === null ? null : (campos[delServidor] ?? delServidor);
     // Solo se marca un campo que el formulario conoce
@@ -158,6 +162,12 @@ export class Validacion {
     this.errores.set({});
     this.marcado.set(null);
     this.general.set(null);
+  }
+
+  /** Las etiquetas vigentes (una función si dependen de los datos, p. ej. el nombre de cada perfil). */
+  private etiquetas(): Record<string, string> {
+    const e = this.opciones.etiquetas;
+    return typeof e === 'function' ? e() : e;
   }
 
   private avisar(destino: 'campo' | 'resumen'): void {

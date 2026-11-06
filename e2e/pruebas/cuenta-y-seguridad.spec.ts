@@ -1,9 +1,8 @@
 import { expect, test } from '@playwright/test';
-import { crearUsuario, ingresar, ingresarComoAdminPropio, ingresarConClaveInicial, reiniciarMock, salir, sinDesplazamientoHorizontal, unico } from './apoyo';
+import { api, crearUsuario, DOMINIO, filaDeUsuario, ingresar, ingresarComoAdminPropio, ingresarConClaveInicial, reiniciarMock, salir, sinDesplazamientoHorizontal, unico } from './apoyo';
 
 // Portado de digsa-java/e2e/pruebas/cuenta-y-seguridad.spec.ts: «Cambiar mi contraseña» sin salir de la aplicación (condición 12), TIME
-// OUT editable por el administrador (Anexo 5, 3.2) y desbloqueo de un usuario. Los dos casos del administrador dependen de la pantalla
-// Usuarios, que se porta en A5: quedan marcados como pendientes, sin borrarlos (ADR-011).
+// OUT editable por el administrador (Anexo 5, 3.2) y desbloqueo de un usuario desde la pantalla Usuarios (A5).
 
 test.beforeEach(() => reiniciarMock());
 test.afterEach(async ({ page }) => salir(page));
@@ -50,12 +49,58 @@ test('cambiar mi contraseña: con la actual errada avisa; con la correcta sigue 
   await ctx.close();
 });
 
-test('el administrador cambia el TIME OUT en Usuarios › Seguridad y lo restablece', async () => {
-  test.fixme(true, 'Pendiente de A5: la pantalla Usuarios › Seguridad (y su contrato en seguridad.yaml)');
+test('el administrador cambia el TIME OUT en Usuarios › Seguridad y lo restablece', async ({ page }) => {
+  await ingresarComoAdminPropio(page);
+  const antes = (await api<{ minutosSesion: number }>(page, 'GET', '/api/usuarios/seguridad')).datos.minutosSesion;
+  const otro = antes === 2 ? 3 : 2;
+  try {
+    await page.getByRole('link', { name: 'Usuarios' }).click();
+    await page.getByRole('button', { name: 'Seguridad' }).click();
+    const campo = page.getByTestId('minutos-sesion');
+    await expect(campo).toHaveValue(String(antes));
+    await campo.fill(String(otro));
+    await page.getByRole('dialog', { name: 'Seguridad' }).getByRole('button', { name: 'Guardar' }).click();
+    await expect(page.getByText(`Tiempo de inactividad actualizado: ${otro} minutos.`)).toBeVisible();
+    expect((await api<{ minutosSesion: number }>(page, 'GET', '/api/usuarios/seguridad')).datos.minutosSesion).toBe(otro);
+    expect((await api<{ minutosInactividad: number }>(page, 'GET', '/api/sesion')).datos.minutosInactividad).toBe(otro);
+  } finally {
+    // El servidor de las e2e es compartido: si no se restablece, las pruebas siguientes fallan por inactividad sin decir por qué
+    const r = await api(page, 'PUT', '/api/usuarios/seguridad', { minutosSesion: antes });
+    expect(r.estado, 'restablecer el TIME OUT').toBe(200);
+  }
 });
 
-test('un usuario bloqueado por 5 intentos aparece «Bloqueado» y el administrador lo desbloquea', async () => {
-  test.fixme(true, 'Pendiente de A5: la pantalla Usuarios (fila «Bloqueado» y «Desbloquear a …»)');
+test('un usuario bloqueado por 5 intentos aparece «Bloqueado» y el administrador lo desbloquea', async ({ page, browser }) => {
+  await ingresarComoAdminPropio(page);
+  // Como el monolito: el auditor se crea por POST /api/usuarios con la sesión del administrador
+  const usuario = unico('cuenta');
+  const creado = await api(page, 'POST', '/api/usuarios', {
+    nombre: 'Auditor Cuenta de Prueba',
+    usuario,
+    correo: `${usuario}${DOMINIO}`,
+    documento: '80111222',
+    perfiles: [3],
+    claveInicial: INICIAL,
+  });
+  expect(creado.estado, JSON.stringify(creado.datos)).toBe(201);
+
+  const ctx = await browser.newContext();
+  const p = await ctx.newPage();
+  // Sin sesión, «/» navega (página completa) al ingreso del emisor: se va directo para que la API no choque con esa navegación
+  await p.goto('/ingreso');
+  await api(p, 'GET', '/api/auth/inicio');
+  for (let i = 0; i < 5; i++) {
+    // El monolito local no tenía captcha; aquí va una respuesta no vacía (la clave de PRUEBA de Turnstile aprueba cualquiera en el mock)
+    expect((await api(p, 'POST', '/api/auth/ingreso', { usuario, clave: `Errada.Numero.${i}.X`, captcha: 'prueba' })).estado).toBe(401);
+  }
+  await ctx.close();
+
+  await page.getByRole('link', { name: 'Usuarios' }).click();
+  const fila = await filaDeUsuario(page, usuario);
+  await expect(fila.getByText('Bloqueado')).toBeVisible();
+  await fila.getByRole('button', { name: 'Desbloquear a Auditor Cuenta de Prueba' }).click();
+  await expect(page.getByText('Usuario desbloqueado.')).toBeVisible();
+  await expect(fila.getByText('Bloqueado')).toHaveCount(0);
 });
 
 test('celular (360 px): «Mi contraseña» está en el menú y no hay desplazamiento horizontal', async ({ page }) => {

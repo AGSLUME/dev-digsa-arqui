@@ -32,6 +32,35 @@ pruebas del monolito.
 - Los casos que dependen de datos sembrados del monolito (`admin.e2e`, módulos de `logs/opciones`) se sembrarán por el contrato o por
   el control del mock.
 
+### Diferencias de la implementación de A5 (Usuarios y Roles adicionales)
+
+- **Botones de fila**: Mantine usa `variant="light"` con colores (gris, verde, naranja, uva, rojo); LUME no tiene botones de color
+  suave, así que van como `secundario` pequeño y «Cerrar sesión» como `peligro`. Textos, `aria-label` y condiciones son los del
+  monolito.
+- **«Editar»** lleva `aria-label="Editar a <nombre>"` (y en Roles, `Editar el rol <nombre>`, igual que el monolito): en el monolito el
+  de Usuarios no tenía, y todos los «Editar» de la tabla se llamaban igual (WCAG 2.4.6). `getByRole('button', { name: 'Editar' })` sigue
+  encontrándolo (coincidencia parcial).
+- **Insignias de estado**: «Contraseña inicial» (`grape` en Mantine) va en la variante info, como todo color fuera de la paleta LUME;
+  «Activo», «Bloqueado» e «Inactivo» son rellenas y «Sesión abierta» y «Contraseña inicial» con borde, como el `Badge` del monolito.
+- **«Buscar»** filtra también sin tildes (el monolito solo pasaba a minúsculas): «jose» encuentra a «José».
+- **E2E**: `roles.spec` comprueba el 403 con `GET /api/usuarios` en lugar de `/api/agenda/opciones` (el servicio de visitas aún no
+  existe en esta sesión; la regla de autorización por pantalla es la misma). El bloqueo por 5 intentos manda una respuesta de captcha
+  (el monolito local no tenía captcha). Sin sesión, `/` navega a página completa al ingreso del emisor: las pruebas que miden o llaman
+  a la API antes de ingresar esperan a `/ingreso`.
+- **Mock** (`frontend/mock/usuarios.mjs`): reglas y textos de `ServicioUsuarios`, `ServicioRoles`, `Roles`, `Alcance` y
+  `Alertas.normalizarTelefono`; los establecimientos y regionales son ficticios y fijos.
+
+### Diferencias de la implementación de A5 (Logs del sistema, contrato 0.5.0)
+
+- **Fechas**: `lume-fecha` (escribir DD/MM/AAAA o elegir en el calendario del navegador) en lugar del `DatePickerInput`; una fecha mal
+  escrita da error en su campo al buscar (en Mantine no se podía escribir mal).
+- **«No hay registros con estos filtros.»** se anuncia (`role="status"`).
+- El campo `servicio` de `FilaLog` (nuevo en el contrato) no se muestra: la pantalla del monolito no tenía esa columna.
+- **Mock** (`frontend/mock/logs.mjs`): guarda solo los eventos de negocio (ingreso, salida, usuarios, roles, perfiles, TIME OUT,
+  reportes), no una fila de «consulta» por cada petición como el monolito; el módulo es `auth`, `usuarios` o `logs`. El Excel es una hoja
+  simple con el mismo encabezado y columnas (`mock/xlsx.mjs`, sin dependencias) y los reportes solo se envían a `angular.prueba.local`
+  (`DIGSA_MOCK_DOMINIOS_REPORTES`).
+
 ---
 
 # Inventario literal: Usuarios, Roles adicionales y Logs (monolito digsa-java)

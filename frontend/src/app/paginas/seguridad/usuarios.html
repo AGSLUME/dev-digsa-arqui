@@ -1,0 +1,138 @@
+<div class="lume-pila">
+  <lume-encabezado-pagina titulo="Usuarios" fuente="Anexo 5 · 1.10–1.12, 3.1–3.7">
+    <ng-container acciones>
+      <button lumeBoton="secundario" type="button" (click)="seguridadAbierta.set(true)">Seguridad</button>
+      <button lumeBoton="secundario" type="button" (click)="perfilesAbierto.set(true)">Nombres de perfiles</button>
+      <button lumeBoton="secundario" type="button" (click)="rolesAbierto.set(true)">Roles adicionales</button>
+      <button lumeBoton type="button" [disabled]="!datos()" (click)="formulario.set(null)">Nuevo usuario</button>
+    </ng-container>
+  </lume-encabezado-pagina>
+
+  @if (errorCarga(); as e) {
+    <lume-alerta color="red">
+      {{ e }}
+      <button lumeBoton="secundario" tamano="pequeno" type="button" (click)="cargar()">Reintentar</button>
+    </lume-alerta>
+  }
+  <lume-resumen-errores [validacion]="vAccion" />
+
+  <div role="search" class="lume-buscar">
+  <lume-campo etiqueta="Buscar">
+    <input lumeEntrada type="search" placeholder="Nombre, usuario o correo" autocomplete="off" [value]="buscar()" (input)="escribirBusqueda($any($event.target).value)" />
+  </lume-campo>
+  </div>
+
+  <div lumeTablaAdaptable="Usuarios">
+    <table class="lume-tabla lume-tabla--min-760">
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Usuario</th>
+          <th>Correo</th>
+          <th>Perfiles</th>
+          <th>Último ingreso</th>
+          <th>Estado</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (u of pag.visibles(); track u.id) {
+          <tr [attr.data-testid]="'usuario-' + u.usuario">
+            <td>{{ u.nombre }}</td>
+            <td>{{ u.usuario }}</td>
+            <td>{{ u.correo }}</td>
+            <td>
+              <div class="lume-insignias">
+                @for (p of u.perfiles; track p) {
+                  <lume-insignia>{{ nombrePerfil(p) }}</lume-insignia>
+                }
+              </div>
+            </td>
+            <td>{{ fechaHora(u.ultimoIngreso) }}</td>
+            <td>
+              <div class="lume-insignias">
+                @if (!u.activo) {
+                  <lume-insignia color="gray" estilo="relleno">Inactivo</lume-insignia>
+                } @else if (u.bloqueado) {
+                  <lume-insignia color="orange" estilo="relleno">Bloqueado</lume-insignia>
+                } @else {
+                  <lume-insignia color="green" estilo="relleno">Activo</lume-insignia>
+                }
+                @if (u.sesionAbierta) {
+                  <lume-insignia color="blue" estilo="borde">Sesión abierta</lume-insignia>
+                }
+                @if (u.claveInicial) {
+                  <lume-insignia color="grape" estilo="borde">Contraseña inicial</lume-insignia>
+                }
+              </div>
+            </td>
+            <td>
+              <div class="lume-acciones-fila">
+                <button lumeBoton="secundario" tamano="pequeno" type="button" [attr.aria-label]="'Editar a ' + u.nombre" (click)="formulario.set(u)">Editar</button>
+                <button lumeBoton="secundario" tamano="pequeno" type="button" [attr.aria-disabled]="enAccion() || null"
+                  [attr.aria-label]="(u.activo ? 'Inactivar a ' : 'Activar a ') + u.nombre" (click)="cambiarEstado(u)">
+                  {{ u.activo ? 'Inactivar' : 'Activar' }}
+                </button>
+                <button lumeBoton="secundario" tamano="pequeno" type="button" [attr.aria-disabled]="enAccion() || null"
+                  [attr.aria-label]="'Restablecer la contraseña de ' + u.nombre" (click)="restablecer(u)">
+                  Restablecer la contraseña
+                </button>
+                <button lumeBoton="secundario" tamano="pequeno" type="button" [attr.aria-disabled]="enAccion() || null"
+                  [attr.aria-label]="'Asignar contraseña inicial a ' + u.nombre" (click)="abrirClaveInicial(u)">
+                  Contraseña inicial
+                </button>
+                @if (u.bloqueado) {
+                  <button lumeBoton="secundario" tamano="pequeno" type="button" [attr.aria-disabled]="enAccion() || null"
+                    [attr.aria-label]="'Desbloquear a ' + u.nombre" (click)="desbloquear(u)">
+                    Desbloquear
+                  </button>
+                }
+                @if (u.sesionAbierta) {
+                  <button lumeBoton="peligro" tamano="pequeno" type="button" [attr.aria-disabled]="enAccion() || null"
+                    [attr.aria-label]="'Cerrar la sesión de ' + u.nombre" (click)="cerrarSesion(u)">
+                    Cerrar la sesión
+                  </button>
+                }
+              </div>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+  <lume-paginacion nombre="usuarios" [total]="pag.total()" [pagina]="pag.pagina()" (paginaChange)="pag.irAPagina($event)" />
+</div>
+
+@if (datos(); as d) {
+  <lume-modal [abierto]="formulario() !== undefined" [titulo]="formulario() ? 'Editar usuario' : 'Nuevo usuario'" ancho="lg" (cerrar)="formulario.set(undefined)">
+    <ng-template lumeCuerpoModal>
+      <lume-formulario-usuario [editado]="formulario() ?? null" [lista]="d" (guardado)="formulario.set(undefined)" (cancelar)="formulario.set(undefined)" />
+    </ng-template>
+  </lume-modal>
+
+  <lume-modal [abierto]="perfilesAbierto()" titulo="Nombres de perfiles" ancho="lg" (cerrar)="perfilesAbierto.set(false)">
+    <ng-template lumeCuerpoModal>
+      <lume-nombres-perfiles [perfiles]="d.perfiles" />
+    </ng-template>
+  </lume-modal>
+}
+
+<lume-modal [abierto]="claveInicialDe() !== null" titulo="Asignar contraseña inicial" (cerrar)="claveInicialDe.set(null)">
+  <ng-template lumeCuerpoModal>
+    @if (claveInicialDe(); as u) {
+      <lume-asignar-clave-inicial [usuario]="u" (listo)="claveInicialDe.set(null)" />
+    }
+  </ng-template>
+</lume-modal>
+
+<lume-modal [abierto]="seguridadAbierta()" titulo="Seguridad" (cerrar)="seguridadAbierta.set(false)">
+  <ng-template lumeCuerpoModal>
+    <lume-parametros-seguridad (listo)="seguridadAbierta.set(false)" />
+  </ng-template>
+</lume-modal>
+
+<lume-modal [abierto]="rolesAbierto()" titulo="Roles adicionales" ancho="xl" (cerrar)="rolesAbierto.set(false)">
+  <ng-template lumeCuerpoModal>
+    <lume-roles-adicionales />
+  </ng-template>
+</lume-modal>

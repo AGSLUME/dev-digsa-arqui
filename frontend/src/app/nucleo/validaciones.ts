@@ -30,3 +30,38 @@ export function erroresClaveNueva(clave: string, confirmacion: string): { clave:
 export function conTexto(error: string | true | undefined): string | undefined {
   return error === true ? 'Revise este campo: el motivo está en el aviso de arriba.' : error;
 }
+
+const CORREO = /^[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+/** ¿Es un correo que el servidor acepta? (el patrón y el máximo de 150 de reglas/Correos.java). */
+export function correoValido(correo: string): boolean {
+  const c = correo.trim();
+  return c.length <= 150 && CORREO.test(c);
+}
+
+/** Error de un correo: vacío → `vacio`; con formato inválido → `invalido`; bien → null. */
+export function errorCorreo(correo: string, invalido = 'Escriba un correo válido.', vacio = 'Escriba el correo.'): string | null {
+  if (!correo.trim()) return vacio;
+  return correoValido(correo) ? null : invalido;
+}
+
+/** Móvil colombiano en E.164 (+57 y 10 dígitos que empiezan por 3), como reglas/Alertas.normalizarTelefono; null si no lo es. */
+export function normalizarTelefono(telefono: string): string | null {
+  let t = telefono.trim().replace(/[\s().-]+/g, '');
+  if (t.startsWith('+57')) t = t.slice(3);
+  else if (t.startsWith('0057')) t = t.slice(4);
+  else if (t.startsWith('57') && t.length === 12) t = t.slice(2);
+  return /^3\d{9}$/.test(t) ? '+57' + t : null;
+}
+
+export const ERROR_TELEFONO = 'El teléfono debe ser un móvil colombiano: +57 y 10 dígitos que empiezan por 3 (p. ej. +57 300 000 0000).';
+
+/**
+ * Error del teléfono móvil (alertas.ts del monolito): vacío o igual al guardado es válido (los usuarios registrados antes de la validación
+ * se pueden editar sin cambiarlo); si no, debe ser un móvil colombiano.
+ */
+export function errorTelefono(escrito: string, guardado: string | null = null): string | null {
+  const t = escrito.trim();
+  if (!t || t === guardado) return null;
+  return normalizarTelefono(t) ? null : ERROR_TELEFONO;
+}
