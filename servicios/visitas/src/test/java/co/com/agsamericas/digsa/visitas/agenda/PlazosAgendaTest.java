@@ -112,4 +112,21 @@ class PlazosAgendaTest extends FixturaAgenda {
             plazosAgenda.plazos();
         }
     }
+    @Test
+    @DisplayName("editar un parámetro de plazos en Catálogos se ve de inmediato en la agenda (revisión Java A1)")
+    void editarEnCatalogosDescartaLaCache() throws Exception {
+        String original = parametro("notif_habiles_modulo");
+        try {
+            vencerCache();
+            plazosAgenda.plazos(); // queda en caché con el valor actual
+            String nuevo = "3".equals(original) ? "4" : "3";
+            put("/api/catalogos/parametros/notif_habiles_modulo", token(nuevoUid(), java.util.List.of("Coordinador"), null, "CATALOGOS"),
+                    java.util.Map.of("valor", nuevo))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+            assertThat(plazosAgenda.plazos().regla("notif_habiles_modulo")).isEqualTo(Integer.parseInt(nuevo));
+        } finally {
+            fijar("notif_habiles_modulo", original);
+            plazosAgenda.olvidar();
+        }
+    }
 }

@@ -22,7 +22,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -32,7 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
  * Maestros del coordinador: puntos (ESM del anexo del OPL, farmacias alternas y nivel central), datos propios de los auditores (rol técnico
  * y municipio base), el operador logístico y las obligaciones del contrato. Portado de {@code maestros.ServicioMaestros} del monolito
  * (develop @ 1ff82de) con los mismos textos. Diferencias: los usuarios salen de la copia local ({@link DirectorioUsuarios}); «ya se calificó
- * en visitas» se consulta por {@link UsoObligaciones} (ejecución, VISITAS B).
+ * en visitas» se consulta por {@link UsoObligaciones} (sobre la tabla de ejecución, VISITAS B).
  */
 @Service
 public class ServicioMaestros {
@@ -65,11 +65,11 @@ public class ServicioMaestros {
     private final JdbcClient jdbc;
     private final BitacoraVisitas bitacora;
     private final DirectorioUsuarios usuarios;
-    private final ObjectProvider<UsoObligaciones> usoObligaciones;
+    private final UsoObligaciones usoObligaciones;
     private final Clock reloj;
 
     public ServicioMaestros(JdbcClient jdbc, BitacoraVisitas bitacora, DirectorioUsuarios usuarios,
-                            ObjectProvider<UsoObligaciones> usoObligaciones, Clock reloj) {
+                            UsoObligaciones usoObligaciones, Clock reloj) {
         this.jdbc = jdbc;
         this.bitacora = bitacora;
         this.usuarios = usuarios;
@@ -147,6 +147,9 @@ public class ServicioMaestros {
             return id;
         } catch (DuplicateKeyException e) {
             throw duplicado();
+        } catch (DataIntegrityViolationException e) {
+            // La fuerza, el municipio o la regional se borró o cambió entre la validación y el guardado (revisión Java M6): 422, no 500
+            throw ErrorNegocio.validacion("La fuerza, el municipio o la regional cambió mientras guardaba. Revise e intente de nuevo.");
         }
     }
 
@@ -164,6 +167,9 @@ public class ServicioMaestros {
                     .params(parametros(v)).param("ahora", OffsetDateTime.now(reloj)).param("id", id).update();
         } catch (DuplicateKeyException e) {
             throw duplicado();
+        } catch (DataIntegrityViolationException e) {
+            // La fuerza, el municipio o la regional se borró o cambió entre la validación y el guardado (revisión Java M6): 422, no 500
+            throw ErrorNegocio.validacion("La fuerza, el municipio o la regional cambió mientras guardaba. Revise e intente de nuevo.");
         }
         String cambios = Bitacora.cambios(fotoPunto(antes), fotoPunto(v), CONTACTO);
         bitacora.registrar("punto_editado", "Punto " + id + (cambios.isEmpty() ? " sin cambios" : ": " + cambios));
@@ -452,7 +458,7 @@ public class ServicioMaestros {
             Map<String, Object> actual = jdbc.sql("SELECT codigo, prestador FROM obligaciones_contrato WHERE id = :id FOR UPDATE").param("id", id)
                     .query().listOfRows().stream().findFirst().orElseThrow(() -> ErrorNegocio.noEncontrado("La obligación no existe."));
             boolean cambiaClave = !codigo.equals(actual.get("codigo")) || !prestador.equals(actual.get("prestador"));
-            if (cambiaClave && calificada(id)) {
+            if (cambiaClave && usoObligaciones.calificada(id)) {
                 throw ErrorNegocio.validacion("La obligación ya se calificó en visitas: no cambie su código ni su prestador; inactívela y cree otra.");
             }
             jdbc.sql("UPDATE obligaciones_contrato SET prestador = :p, codigo = :c, texto = :t, fuente = :f, activo = :a WHERE id = :id")
@@ -462,11 +468,6 @@ public class ServicioMaestros {
         } catch (DuplicateKeyException e) {
             throw ErrorNegocio.validacion("Ya existe la obligación " + codigo + ".");
         }
-    }
-
-    private boolean calificada(long obligacionId) {
-        UsoObligaciones uso = usoObligaciones.getIfAvailable();
-        return uso != null && uso.calificada(obligacionId);
     }
 
     // ---------- Apoyo ----------

@@ -17,6 +17,8 @@ import java.util.Optional;
 import java.util.Set;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Acceso a las visitas, su equipo, componentes, reparto e historial. SQL explícito (duda 17.6). Portado de {@code agenda.RepositorioVisitas}
@@ -41,6 +43,11 @@ public class RepositorioVisitas {
 
     public record Miembro(long id, String nombre, String usuario, String correo, String documento, String rol, String funcion, int orden,
                           boolean activo) {
+        /** Sin documento ni correo (Ley 1581). */
+        @Override
+        public String toString() {
+            return "Miembro[id=" + id + ", usuario=" + usuario + ", rol=" + rol + ", funcion=" + funcion + ", orden=" + orden + "]";
+        }
     }
 
     /** Tipo de visita del catálogo. */
@@ -73,6 +80,7 @@ public class RepositorioVisitas {
      * Bloquea la fila de la visita hasta el fin de la transacción (dos coordinadores a la vez: uno espera al otro). {@code FOR NO KEY UPDATE}:
      * no detiene los INSERT de historial, archivos o respuestas que solo toman {@code KEY SHARE} por la FK.
      */
+    @Transactional(propagation = Propagation.MANDATORY) // fuera de una transacción el candado se soltaría de inmediato
     public Optional<Visita> bloquear(long id) {
         return jdbc.sql("SELECT " + COLUMNAS + DESDE + " WHERE v.id = :id FOR NO KEY UPDATE OF v").param("id", id).query(RepositorioVisitas::fila).optional();
     }
@@ -137,6 +145,7 @@ public class RepositorioVisitas {
 
     // ---------- Escrituras ----------
 
+    @Transactional // varias sentencias: todo o nada (se une a la transacción de quien llama)
     public long crear(String tipo, long puntoId, LocalDate fecha, LocalTime hora, long liderId, String alcance, LocalDate fechaSolicitud,
                       long creadoPor) {
         OffsetDateTime ahora = OffsetDateTime.now(reloj);
@@ -220,6 +229,7 @@ public class RepositorioVisitas {
                 .query(String.class).list();
     }
 
+    @Transactional // varias sentencias: todo o nada (se une a la transacción de quien llama)
     public void reemplazarComponentes(long visitaId, Collection<String> componentes) {
         jdbc.sql("DELETE FROM visitas_componentes WHERE visita_id = :id").param("id", visitaId).update();
         for (String c : componentes) {
@@ -237,6 +247,7 @@ public class RepositorioVisitas {
     }
 
     /** Reemplaza el equipo (borra antes el reparto: cada parte es de un integrante). Líder con orden 0, los demás 1…N. */
+    @Transactional // varias sentencias: todo o nada (se une a la transacción de quien llama)
     public void reemplazarEquipo(long visitaId, long liderId, List<Long> otros) {
         jdbc.sql("DELETE FROM visitas_reparto WHERE visita_id = :id").param("id", visitaId).update();
         jdbc.sql("DELETE FROM visitas_auditores WHERE visita_id = :id").param("id", visitaId).update();
@@ -256,6 +267,7 @@ public class RepositorioVisitas {
         return r;
     }
 
+    @Transactional // varias sentencias: todo o nada (se une a la transacción de quien llama)
     public void reemplazarReparto(long visitaId, Map<String, Long> reparto, Map<String, String> asignadoPor) {
         jdbc.sql("DELETE FROM visitas_reparto WHERE visita_id = :id").param("id", visitaId).update();
         OffsetDateTime ahora = OffsetDateTime.now(reloj);

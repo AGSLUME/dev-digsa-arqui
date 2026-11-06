@@ -13,6 +13,8 @@ import co.com.agsamericas.digsa.visitas.api.modelo.Parametro;
 import co.com.agsamericas.digsa.visitas.api.modelo.Regional;
 import co.com.agsamericas.digsa.visitas.api.modelo.TipoVisita;
 import co.com.agsamericas.digsa.visitas.api.modelo.ValorCatalogo;
+import co.com.agsamericas.digsa.reglas.Plazos;
+import co.com.agsamericas.digsa.visitas.agenda.PlazosAgenda;
 import co.com.agsamericas.digsa.visitas.compartido.BitacoraVisitas;
 import co.com.agsamericas.digsa.visitas.usuarios.DirectorioUsuarios;
 import java.sql.Array;
@@ -32,6 +34,8 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Catálogos editables en vivo por el coordinador (Anexo 5, prueba 4: fuerzas y tipos de documento se crean, modifican y eliminan desde la
@@ -62,12 +66,14 @@ public class ServicioCatalogos {
     private final JdbcClient jdbc;
     private final BitacoraVisitas bitacora;
     private final DirectorioUsuarios usuarios;
+    private final PlazosAgenda plazos;
     private final Clock reloj;
 
-    public ServicioCatalogos(JdbcClient jdbc, BitacoraVisitas bitacora, DirectorioUsuarios usuarios, Clock reloj) {
+    public ServicioCatalogos(JdbcClient jdbc, BitacoraVisitas bitacora, DirectorioUsuarios usuarios, PlazosAgenda plazos, Clock reloj) {
         this.jdbc = jdbc;
         this.bitacora = bitacora;
         this.usuarios = usuarios;
+        this.plazos = plazos;
         this.reloj = reloj;
     }
 
@@ -310,8 +316,8 @@ public class ServicioCatalogos {
     @Transactional
     public long crearRegional(String nombre) {
         String n = validarRegional(nombre);
-        // Candado por transacción: dos altas a la vez no pasan juntas el tope de 30 (el monolito contaba sin candado)
-        jdbc.sql("LOCK TABLE par_regionales IN SHARE ROW EXCLUSIVE MODE").update();
+        // Candado consultivo por transacción: dos altas a la vez no pasan juntas el tope de 30 (el monolito contaba sin candado)
+        jdbc.sql("SELECT pg_advisory_xact_lock(hashtext('visitas.regionales'))").query().listOfRows();
         long total = jdbc.sql("SELECT count(*) FROM par_regionales").query(Long.class).single();
         if (total >= MAX_REGIONALES) {
             throw ErrorNegocio.validacion("Máximo " + MAX_REGIONALES + " regionales.");
@@ -368,6 +374,15 @@ public class ServicioCatalogos {
         jdbc.sql("UPDATE par_parametros SET valor = :v, actualizado_por = :u, actualizado = :ahora WHERE clave = :c")
                 .param("v", v).param("u", quien).param("ahora", OffsetDateTime.now(reloj)).param("c", clave).update();
         String antes = p.get("valor") == null ? "" : String.valueOf(p.get("valor"));
+        if (Plazos.REGLAS.containsKey(clave)) {
+            // La agenda guarda los plazos 30 s: se descartan al confirmar, para que el cambio se vea de inmediato como en el monolito
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    plazos.olvidar();
+                }
+            });
+        }
         boolean conCorreos = "correo_digsa".equals(clave);
         bitacora.registrar("parametro_editado", "Parámetro " + clave + (antes.equals(v) ? " sin cambios"
                 : conCorreos ? ": modificado" : ": «" + Bitacora.cortar(antes, 40) + "» → «" + Bitacora.cortar(v, 40) + "»"));

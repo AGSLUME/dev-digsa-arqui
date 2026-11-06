@@ -41,7 +41,15 @@ public class AlmacenDisco implements Almacen {
     public void guardar(String ruta, byte[] contenido) throws IOException {
         Path p = resolver(ruta);
         Files.createDirectories(p.getParent());
-        Files.write(p, contenido, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+        try {
+            Files.write(p, contenido, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+        } catch (java.nio.file.FileAlreadyExistsException e) {
+            throw e; // nunca se toca un archivo que ya existía
+        } catch (IOException e) {
+            // Falló a medias (p. ej. disco lleno): no queda un archivo parcial que bloquee el reintento (revisión Java B7)
+            Files.deleteIfExists(p);
+            throw e;
+        }
     }
 
     @Override

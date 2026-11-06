@@ -351,7 +351,8 @@ paths:
       summary: Crear un punto
       description: |
         201 `{id, mensaje: «Punto creado.»}`. 422 con todos los errores juntos: «Revise el punto: e1; e2; ….» (ver `DatosPunto`), o «Ya
-        existe un punto con ese nombre en esa unidad, o con esa sigla.».
+        existe un punto con ese nombre en esa unidad, o con esa sigla.». Si la fuerza, el municipio o la regional se borra mientras se guarda: 422
+        «La fuerza, el municipio o la regional cambió mientras guardaba. Revise e intente de nuevo.» (el monolito daba 500).
       security:
         - sesionGateway: []
       requestBody:

@@ -226,4 +226,59 @@ class ValidadorArchivosTest {
         assertThat(ValidadorArchivos.dimensiones("texto".getBytes(StandardCharsets.UTF_8))).isNull();
         assertThat(ValidadorArchivos.dimensiones(pdfMinimo())).isNull();
     }
+    // ---------------------------------------------------------------- documentos de Office (revisión Java M4)
+
+    private static byte[] zip(String... entradas) throws IOException {
+        ByteArrayOutputStream b = new ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream z = new java.util.zip.ZipOutputStream(b)) {
+            for (String e : entradas) {
+                z.putNextEntry(new java.util.zip.ZipEntry(e));
+                z.write("<x/>".getBytes(StandardCharsets.UTF_8));
+                z.closeEntry();
+            }
+        }
+        return b.toByteArray();
+    }
+
+    @Test
+    void unZipCualquieraLlamadoDocxNoEsUnWord() throws IOException {
+        byte[] falso = zip("leeme.txt", "bin/programa.sh");
+        assertThatThrownBy(() -> validador.validar("informe.docx", falso)).isInstanceOf(ErrorNegocio.class)
+                .hasMessage(NO_ADMITIDO.formatted("informe.docx"));
+        assertThatThrownBy(() -> validador.validar("tabla.xlsx", falso)).isInstanceOf(ErrorNegocio.class);
+    }
+
+    @Test
+    void unDocxConSuEstructuraSeAcepta() throws IOException {
+        byte[] docx = zip("[Content_Types].xml", "_rels/.rels", "word/document.xml");
+        ValidadorArchivos.Valido v = validador.validar("informe.docx", docx);
+        assertThat(v.extension()).isEqualTo("docx");
+        assertThat(ValidadorArchivos.estructuraOffice(docx, v.tipo())).isTrue();
+    }
+
+    @Test
+    void unWordNoPasaPorExcelNiAlReves() throws IOException {
+        byte[] docx = zip("[Content_Types].xml", "word/document.xml");
+        assertThat(ValidadorArchivos.estructuraOffice(docx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")).isFalse();
+        byte[] xlsx = zip("[Content_Types].xml", "xl/workbook.xml");
+        assertThat(validador.validar("datos.xlsx", xlsx).extension()).isEqualTo("xlsx");
+        assertThatThrownBy(() -> validador.validar("datos.docx", xlsx)).isInstanceOf(ErrorNegocio.class);
+    }
+
+    @Test
+    void unZipQueSeDescomprimeDemasiadoNoEsOffice() throws IOException {
+        ByteArrayOutputStream b = new ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream z = new java.util.zip.ZipOutputStream(b)) {
+            z.putNextEntry(new java.util.zip.ZipEntry("[Content_Types].xml"));
+            z.closeEntry();
+            z.putNextEntry(new java.util.zip.ZipEntry("word/document.xml"));
+            byte[] ceros = new byte[1024 * 1024];
+            for (int i = 0; i <= ValidadorArchivos.MAX_DESCOMPRIMIDO / ceros.length; i++) {
+                z.write(ceros);
+            }
+            z.closeEntry();
+        }
+        assertThat(ValidadorArchivos.estructuraOffice(b.toByteArray(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+                .isFalse();
+    }
 }

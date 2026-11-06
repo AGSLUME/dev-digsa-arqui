@@ -1,6 +1,7 @@
 # Servicio visitas (ADR-002). Ningún secreto tiene valor por defecto: vienen del .env (local) o de Vault (cierre).
 server:
   port: ${VISITAS_PUERTO:9102}
+  shutdown: graceful
   # X-Forwarded-* solo se aceptan del gateway (ADR-003): RemoteIpValve con proxies internos acotados.
   forward-headers-strategy: native
   tomcat:
@@ -20,6 +21,13 @@ spring:
     hikari:
       schema: visitas
       maximum-pool-size: ${VISITAS_DB_POOL:10}
+      # Sin conexión libre en 5 s, la petición falla (no espera los 30 s por defecto). Se revisa con la prueba de carga.
+      connection-timeout: 5000
+  servlet:
+    multipart:
+      # Como el monolito: hasta 100 MB por video y 25 MB por archivo los controla ValidadorArchivos; esto es el tope del servidor.
+      max-file-size: 110MB
+      max-request-size: 120MB
   flyway:
     # D8 (ADR-005): Flyway con el dueño del esquema (DDL); la aplicación con el rol «visitas», que solo tiene los GRANT de cada migración.
     user: ${VISITAS_DB_USUARIO_DDL:visitas_ddl}
@@ -40,6 +48,11 @@ spring:
           jwk-set-uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}/oauth2/jwks
           # Audiencia por destinatario: visitas solo acepta tokens dirigidos a él.
           audiences: visitas
+
+lume:
+  archivos:
+    # Volumen del servicio (ADR-005). Sin valor por omisión fuera de local y prueba: si falta, el servicio no arranca (revisión Java M2).
+    carpeta: ${LUME_ARCHIVOS_VISITAS}
 
 management:
   endpoints:

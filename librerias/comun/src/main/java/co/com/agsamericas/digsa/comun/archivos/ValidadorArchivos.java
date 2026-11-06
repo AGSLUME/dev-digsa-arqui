@@ -33,7 +33,7 @@ public class ValidadorArchivos {
             Map.entry("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"),
             Map.entry("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"),
             Map.entry("application/msword", "doc"), Map.entry("application/vnd.ms-excel", "xls"),
-            Map.entry("application/x-tika-msoffice", "doc"), Map.entry("application/x-tika-ooxml", "docx"),
+            Map.entry("application/x-tika-msoffice", "doc"),
             Map.entry("video/mp4", "mp4"), Map.entry("video/quicktime", "mov"), Map.entry("video/webm", "webm"), Map.entry("video/3gpp", "3gp"),
             Map.entry("text/plain", "txt"), Map.entry("text/markdown", "md"));
 
@@ -70,7 +70,8 @@ public class ValidadorArchivos {
         return switch (porBytes) {
             case "application/zip", "application/x-tika-ooxml" -> {
                 String t = tika.detect(contenido, n);
-                yield t.startsWith("application/vnd.openxmlformats-officedocument.") ? t : porBytes;
+                // El nombre solo dice qué tipo de Office sería; la estructura del ZIP lo confirma (revisión Java M4)
+                yield t.startsWith("application/vnd.openxmlformats-officedocument.") && estructuraOffice(contenido, t) ? t : "application/zip";
             }
             case "application/x-tika-msoffice" -> {
                 String t = tika.detect(contenido, n);
@@ -100,12 +101,75 @@ public class ValidadorArchivos {
         }
     }
 
-    /** Más píxeles que esto no se decodifican para enderezar (evita agotar la memoria con una imagen que declara dimensiones enormes). */
-    static final long MAX_PIXELES = 40_000_000L;
+    /** Entradas y bytes descomprimidos que se revisan, como máximo, para confirmar un documento de Office (evita las bombas ZIP). */
+    static final int MAX_ENTRADAS_ZIP = 5_000;
+    static final long MAX_DESCOMPRIMIDO = 200L * 1024 * 1024;
+
+    /**
+     * ¿El ZIP tiene la estructura de un docx o un xlsx? {@code [Content_Types].xml} y la carpeta {@code word/} o {@code xl/}. Lo que no se
+     * pueda leer, o pase los topes de entradas o de tamaño descomprimido, no lo es.
+     */
+    static boolean estructuraOffice(byte[] zip, String tipo) {
+        String carpeta = tipo.contains("wordprocessingml") ? "word/" : tipo.contains("spreadsheetml") ? "xl/" : null;
+        if (carpeta == null) {
+            return false;
+        }
+        boolean tipos = false;
+        boolean partes = false;
+        long total = 0;
+        byte[] buf = new byte[8192];
+        try (java.util.zip.ZipInputStream in = new java.util.zip.ZipInputStream(new ByteArrayInputStream(zip))) {
+            java.util.zip.ZipEntry e;
+            int entradas = 0;
+            while ((e = in.getNextEntry()) != null) {
+                if (++entradas > MAX_ENTRADAS_ZIP) {
+                    return false;
+                }
+                String n = e.getName();
+                tipos |= "[Content_Types].xml".equals(n);
+                partes |= n.startsWith(carpeta);
+                for (int r; (r = in.read(buf)) > 0; ) {
+                    total += r;
+                    if (total > MAX_DESCOMPRIMIDO) {
+                        return false;
+                    }
+                }
+            }
+        } catch (IOException | RuntimeException ex) {
+            return false;
+        }
+        return tipos && partes;
+    }
+
+    /**
+     * Más píxeles que esto no se decodifican para enderezar: una foto de 16 MP ocupa unos 64 MB al decodificarla y otro tanto la girada
+     * (revisión Java M3; el monolito admitía 40 MP). Además, como máximo {@link #ENDEREZANDO} fotos a la vez.
+     */
+    static final long MAX_PIXELES = 16_000_000L;
+    private static final java.util.concurrent.Semaphore ENDEREZANDO = new java.util.concurrent.Semaphore(2);
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(ValidadorArchivos.class);
 
     /** Aplica la orientación EXIF a la foto (las de celular vienen giradas). Si no se puede, la deja como llegó. */
     static byte[] enderezar(byte[] jpeg) {
+        boolean turno = false;
+        try {
+            turno = ENDEREZANDO.tryAcquire(10, java.util.concurrent.TimeUnit.SECONDS);
+            if (!turno) {
+                LOG.info("[archivos] Foto sin enderezar: demasiadas fotos a la vez");
+                return jpeg;
+            }
+            return enderezarConTurno(jpeg);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return jpeg;
+        } finally {
+            if (turno) {
+                ENDEREZANDO.release();
+            }
+        }
+    }
+
+    private static byte[] enderezarConTurno(byte[] jpeg) {
         int[] dim = dimensiones(jpeg);
         if (dim == null || (long) dim[0] * dim[1] > MAX_PIXELES) {
             LOG.info("[archivos] Foto sin enderezar: dimensiones {} fuera del tope", dim == null ? "ilegibles" : dim[0] + "x" + dim[1]);

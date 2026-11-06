@@ -23,7 +23,7 @@ import org.springframework.web.context.WebApplicationContext;
  * VA1.5: fuera de los perfiles {@code local} y {@code prueba} el controlador de {@code /interno/pruebas/usuarios} no existe, aunque
  * el token de máquina sea válido y traiga el alcance {@code visitas:pruebas}: la copia de usuarios solo la escriben los eventos de seguridad.
  */
-@SpringBootTest
+@SpringBootTest(properties = "LUME_ARCHIVOS_VISITAS=${java.io.tmpdir}/lume-pruebas/visitas/archivos")
 @ActiveProfiles("otro")
 @Import(ContenedoresPrueba.class)
 class InternoPruebasAusenteTest {

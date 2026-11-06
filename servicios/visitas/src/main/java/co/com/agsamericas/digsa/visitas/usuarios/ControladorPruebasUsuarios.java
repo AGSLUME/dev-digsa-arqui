@@ -39,7 +39,7 @@ class ControladorPruebasUsuarios {
         if (u == null || u.uid() == null || u.usuario() == null || u.nombre() == null) {
             return ResponseEntity.badRequest().body(Map.of("mensaje", "Faltan uid, usuario o nombre."));
         }
-        Short[] perfiles = u.perfiles() == null ? new Short[0] : u.perfiles().stream().map(Integer::shortValue).toArray(Short[]::new);
+        Short[] perfiles = u.perfiles() == null ? new Short[0] : u.perfiles().stream().filter(java.util.Objects::nonNull).map(Integer::shortValue).toArray(Short[]::new);
         jdbc.sql("""
                 INSERT INTO usuarios_copia (uid, usuario, nombre, documento, correo, activo, perfiles, alcance_fuerza, alcance_punto,
                                             alcance_regional, version)

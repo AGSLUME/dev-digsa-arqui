@@ -21,6 +21,12 @@ public class DirectorioUsuarios {
     /** Un usuario de la copia. El documento es dato personal: nunca va a logs ni a la bitácora. */
     public record UsuarioCopia(long uid, String usuario, String nombre, String documento, String correo, boolean activo, List<Integer> perfiles) {
 
+        /** Sin documento ni correo: un log o una excepción que imprima el usuario no expone datos personales (Ley 1581). */
+        @Override
+        public String toString() {
+            return "UsuarioCopia[uid=" + uid + ", usuario=" + usuario + ", activo=" + activo + ", perfiles=" + perfiles + "]";
+        }
+
         public boolean tiene(Perfil p) {
             return perfiles.contains((int) p.id());
         }

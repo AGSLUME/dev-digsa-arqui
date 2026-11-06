@@ -5,13 +5,18 @@ import java.util.List;
 
 /**
  * Lo que ejecución, OPL y hallazgos (VISITAS B) piden a la agenda, con las firmas de {@code ServicioAgenda} y {@code ServicioNotificacion} del
- * monolito (develop @ 1ff82de). {@code UsuarioSesion} se reemplaza por {@link Quien}, porque estas operaciones también corren desde tareas
+ * monolito (develop @ 1ff82de). Todas se llaman dentro de una transacción, con la visita ya bloqueada por {@link RepositorioVisitas#bloquear}
+ * cuando la cambian. {@code UsuarioSesion} se reemplaza por {@link Quien}, porque estas operaciones también corren desde tareas
  * programadas, sin token. Las firmas existen desde VA1 para que B compile; la implementación (bean) llega en VA2 con la agenda.
  */
 public interface AgendaParaEjecucion {
 
     /** Quién hace la operación: el usuario de la petición, o {@code uid = null} y {@code usuario = "sistema"} en una tarea programada. */
     record Quien(Long uid, String usuario) {
+        public Quien {
+            java.util.Objects.requireNonNull(usuario, "usuario");
+        }
+
         public static Quien sistema() {
             return new Quien(null, "sistema");
         }
