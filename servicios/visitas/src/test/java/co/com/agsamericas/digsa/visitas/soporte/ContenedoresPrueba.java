@@ -18,7 +18,8 @@ import org.testcontainers.utility.MountableFile;
  *       {@code 10-lume.conf} y {@code definiciones.json}). La aplicación se conecta como {@code visitas}, no como administrador.</li>
  * </ul>
  * Los contenedores son <b>uno por JVM</b>, compartidos por todos los contextos de prueba (p. ej. el del perfil «otro»): levantar otro
- * RabbitMQ por contexto tarda minutos con el equipo cargado. Los detiene Testcontainers (Ryuk) al terminar la JVM.
+ * RabbitMQ por contexto tarda minutos con el equipo cargado. Los detiene Testcontainers (Ryuk) al terminar la JVM. Ojo: también son globales
+ * la base y las colas; un contexto extra no debe despachar el outbox ni escuchar colas (ver InternoPruebasAusenteTest).
  * Las claves son ficticias, solo de prueba.
  */
 @TestConfiguration(proxyBeanMethods = false)
@@ -107,6 +108,7 @@ public class ContenedoresPrueba {
         long limite = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(480);
         while (c.execInContainer("test", "-f", "/var/lib/rabbitmq/.usuarios-lume-listos").getExitCode() != 0) {
             if (System.nanoTime() > limite) {
+                c.stop(); // no queda un broker huérfano; el siguiente contexto lo intenta de nuevo
                 throw new IllegalStateException("usuarios.sh no creó los usuarios de RabbitMQ a tiempo");
             }
             Thread.sleep(500);

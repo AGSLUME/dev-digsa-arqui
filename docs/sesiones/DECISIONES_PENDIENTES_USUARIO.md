@@ -4,6 +4,7 @@ Lo que la integradora o una sesión detectó y que **no** es técnico: lo decide
 
 | # | Detectado | Tema | Contexto | Cuándo decidir |
 |---|---|---|---|---|
+| U-2 | 2026-11-06, reportes | **Proveedor real de SMS** (pendiente) | El monolito no tiene proveedor contratado. Mientras tanto el SMS de alertas críticas se registra sin enviarse (adaptador «ninguno»/archivo); en producción el servicio no arranca sin proveedor. Elegir el proveedor (agregador con API HTTP) | Cierre (I9) |
 | U-1 | 2026-11-06, visitas-a (M5) y seguridad | **Supresión de datos personales (Ley 1581)** (pendiente) | El monolito no tiene baja ni anonimización de usuarios: solo los inactiva (revisado `identidad/ServicioUsuarios` y `RepositorioUsuarios`). Si se quiere atender el derecho de supresión, la técnica ya está lista: la foto de `usuario.*` admite `documento`/`correo` en null y la anonimización saldría como `usuario.actualizado` con versión mayor, que limpia todas las copias (visitas, monolito, reportes). Falta decidir si se ofrece, quién la ejecuta y qué pasa con la bitácora y las actas que ya nombran a la persona. Inventario de dónde queda el dato: tabla del servicio dueño, copias de cada consumidor, `outbox.cuerpo` (hasta 7 días tras publicarse, luego se purga), colas y DLQ de cada consumidor, bitácora y correos guardados 1 año. | Cierre (I9) |
 
 ## Decididas por el usuario (cambian el comportamiento del monolito)
@@ -19,3 +20,4 @@ Lo que la integradora o una sesión detectó y que **no** es técnico: lo decide
 | 2026-11-06 | Enlace del OPL en el correo del acta | El correo conserva el enlace (como el monolito); por eso `visitas` guarda el token **cifrado** (AES-GCM, `VISITAS_OPL_CLAVE`) y lo entrega solo a `notificaciones` por `/interno/avisos/acta/{id}` | visitas-b VB1.4, notificaciones |
 | 2026-11-06 | Perfiles por carga masiva | Solo perfiles de alcance **local** (ESM, OPL, Sanidad, Auditor…). Los nacionales (Coordinador, DIGSA, Analista) solo desde la pantalla Usuarios. El monolito permitía todos menos Administrador | seguridad `/interno/usuarios/importar`, visitas-a VA2b |
 | 2026-11-06 | Reactivar por carga masiva | La carga **no** reactiva a un usuario inactivo: la fila sale con aviso y se reactiva solo desde Usuarios. El monolito sí reactivaba | seguridad `/interno/usuarios/importar` |
+| 2026-11-06 | Reportes de presupuesto | Salen del catálogo de «Reportes» del sistema nuevo y siguen solo en Presupuesto › Reportes del monolito, **sin código de verificación**, mientras presupuesto siga en el monolito | reportes R2 |
