@@ -3,7 +3,8 @@
 #   configurar  ^X\..+$                     su exchange X.eventos y sus colas X.<algo> (+ .reintento, .dlq). Nada ajeno.
 #   escribir    ^X\..+$                     solo publica en SU exchange (nadie publica en nombre de otro) y enlaza sus colas.
 #   leer        ^(X\..+|[a-z-]+\.eventos)$  consume sus colas y puede enlazarlas a los exchanges *.eventos de los demás.
-# El reintento con TTL usa el exchange por defecto como dead-letter: lo hace el broker, no el usuario.
+# El reintento con TTL y la DLQ usan un exchange directo propio <svc>.<cola>.dlx (no el exchange por defecto): RabbitMQ exige
+# escritura sobre el dead-letter exchange al declarar la cola, y ^X\..+$ no cubre amq.default (lo detectó seguridad, S2-OUTBOX).
 # Corre dentro del contenedor, en segundo plano, cuando el nodo responde. Es idempotente (re-crea la clave si ya existe).
 set -eu
 
