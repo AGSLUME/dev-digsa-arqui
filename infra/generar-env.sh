@@ -32,6 +32,10 @@ clave_aes() {
 gw=$((9000 + d))
 secreto_gateway="$(clave)"
 secreto_humo="$(clave)"
+secreto_visitas="$(clave)"
+secreto_reportes="$(clave)"
+secreto_notificaciones="$(clave)"
+secreto_monolito="$(clave)"
 
 contenido=$(cat <<EOF
 # Entorno local de la sesión $sesion (desfase +$d). Generado por infra/generar-env.sh. NO SE VERSIONA.
@@ -104,6 +108,15 @@ LUME_GATEWAY_SECRETO=$secreto_gateway
 LUME_GATEWAY_SECRETO_CODIFICADO='{noop}$secreto_gateway'
 LUME_HUMO_SECRETO=$secreto_humo
 LUME_HUMO_SECRETO_CODIFICADO='{noop}$secreto_humo'
+# Clientes de máquina del emisor (client_credentials). En claro para quien llama; codificado para seguridad. {noop} solo en local.
+LUME_VISITAS_SECRETO=$secreto_visitas
+LUME_VISITAS_SECRETO_CODIFICADO='{noop}$secreto_visitas'
+LUME_REPORTES_SECRETO=$secreto_reportes
+LUME_REPORTES_SECRETO_CODIFICADO='{noop}$secreto_reportes'
+LUME_NOTIFICACIONES_SECRETO=$secreto_notificaciones
+LUME_NOTIFICACIONES_SECRETO_CODIFICADO='{noop}$secreto_notificaciones'
+LUME_MONOLITO_SECRETO=$secreto_monolito
+LUME_MONOLITO_SECRETO_CODIFICADO='{noop}$secreto_monolito'
 LUME_USUARIO_DEV=dev.$sesion
 LUME_CLAVE_DEV=$(clave)
 LUME_PERFIL_DEV=ADMINISTRADOR
