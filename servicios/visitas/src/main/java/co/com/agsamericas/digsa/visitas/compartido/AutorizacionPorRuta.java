@@ -22,13 +22,19 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Component
 public class AutorizacionPorRuta implements HandlerInterceptor, WebMvcConfigurer {
 
-    /** Prefijo de la ruta → autoridad de pantalla. Se agregan aquí las pantallas nuevas (VA2: agenda, calendario, solicitudes…). */
+    /**
+     * Prefijo de la ruta → autoridad de pantalla. Se agregan aquí las pantallas nuevas (VA2: agenda, calendario, solicitudes…; visitas-b
+     * las suyas). Una ruta {@code /api} que no esté aquí ni en {@link #SOLO_SESION} pasa sin esta barrera: lo vigila
+     * {@code AutorizacionPorRutaTest.todaRutaApiTieneSuPantalla}.
+     */
     static final Map<String, String> PANTALLAS = Map.of(
             "/api/catalogos", "PANTALLA_CATALOGOS",
             "/api/maestros", "PANTALLA_MAESTROS");
 
     /** Rutas que solo exigen sesión (monolito: {@code isAuthenticated()}). */
     static final List<String> SOLO_SESION = List.of("/api/catalogos/municipios");
+
+    private static final org.springframework.web.util.UrlPathHelper RUTAS = new org.springframework.web.util.UrlPathHelper();
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
@@ -37,7 +43,7 @@ public class AutorizacionPorRuta implements HandlerInterceptor, WebMvcConfigurer
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        String ruta = request.getRequestURI().substring(request.getContextPath().length());
+        String ruta = RUTAS.getPathWithinApplication(request); // decodificada y sin el contexto (revisión Java de VA2.S, BAJO 9)
         if (SOLO_SESION.contains(ruta)) {
             return true;
         }

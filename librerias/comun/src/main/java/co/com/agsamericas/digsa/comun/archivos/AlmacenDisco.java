@@ -4,9 +4,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -16,8 +19,15 @@ import org.slf4j.LoggerFactory;
 /**
  * Archivos en una carpeta (en local y en Docker, el volumen del servicio; ADR-005), fuera de cualquier carpeta web. Como
  * {@code plataforma.AlmacenLocal} del monolito: rutas relativas con nombre aleatorio, nunca sobrescribe y nunca sale de la raíz. Además
- * (revisión de seguridad de la integradora, BAJA 6): la carpeta se comprueba por su ruta real (un enlace simbólico no saca el archivo de la
- * raíz), la ruta tiene un tope de largo, y {@link #guardar} escribe en un temporal y lo publica de forma atómica con permisos 0600.
+ * (revisión de seguridad de la integradora, BAJA 6, y revisión Java de VA2.S):
+ * <ul>
+ *   <li>la carpeta se comprueba por su ruta real antes de crear nada, y el archivo final no se sigue si es un enlace simbólico;</li>
+ *   <li>la ruta tiene un tope de largo;</li>
+ *   <li>{@link #guardar} escribe en un temporal creado ya con permisos 0600 y lo publica sin sobrescribir: con un enlace duro (atómico) o,
+ *       si el volumen no los admite, creando el destino de forma exclusiva.</li>
+ * </ul>
+ * Riesgo residual documentado: entre la comprobación de la carpeta y la escritura, quien tenga escritura en el volumen podría cambiarla
+ * (TOCTOU); el volumen es solo del servicio.
  */
 public class AlmacenDisco implements Almacen {
 
@@ -44,19 +54,30 @@ public class AlmacenDisco implements Almacen {
         return p;
     }
 
-    /** La ruta, comprobando que su carpeta real (siguiendo enlaces simbólicos) sigue dentro de la raíz real. */
-    private Path real(Path p) throws IOException {
-        Path padre = p.getParent();
-        if (Files.exists(padre) && !padre.toRealPath().startsWith(raiz.toRealPath())) {
+    /** El ancestro existente más profundo de la ruta, por su ruta real, debe seguir dentro de la raíz real (enlaces simbólicos). */
+    private Path dentro(Path p) throws IOException {
+        Files.createDirectories(raiz);
+        Path raizReal = raiz.toRealPath();
+        Path existente = p.getParent();
+        while (existente != null && !Files.exists(existente)) {
+            existente = existente.getParent();
+        }
+        if (existente == null || !existente.toRealPath().startsWith(raizReal)) {
             throw new IllegalArgumentException("Ruta de archivo fuera del almacén");
         }
         return p;
     }
 
     private Path carpeta(Path p) throws IOException {
-        Files.createDirectories(raiz);
+        dentro(p); // antes de crear subcarpetas: un enlace a una carpeta externa no deja crear nada fuera de la raíz
         Files.createDirectories(p.getParent());
-        return real(p);
+        return dentro(p);
+    }
+
+    private static FileAttribute<?>[] soloDueno(Path p) {
+        return p.getFileSystem().supportedFileAttributeViews().contains("posix")
+                ? new FileAttribute<?>[] {PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"))}
+                : new FileAttribute<?>[0];
     }
 
     @Override
@@ -64,44 +85,54 @@ public class AlmacenDisco implements Almacen {
         Path p = carpeta(resolver(ruta));
         Path temporal = p.resolveSibling(".tmp-" + UUID.randomUUID());
         try {
-            Files.write(temporal, contenido, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
-            soloDueno(temporal);
-            // Publicación atómica que NUNCA sobrescribe: el enlace duro falla si el destino ya existe (un rename sí lo pisaría)
+            Files.createFile(temporal, soloDueno(temporal)); // con 0600 desde que existe
+            Files.write(temporal, contenido, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING);
             try {
+                // Publicación atómica que NUNCA sobrescribe: el enlace duro falla si el destino ya existe (un rename sí lo pisaría)
                 Files.createLink(p, temporal);
-            } catch (UnsupportedOperationException e) {
-                Files.move(temporal, p); // sin REPLACE_EXISTING: falla si existe
+            } catch (FileAlreadyExistsException e) {
+                throw e;
+            } catch (UnsupportedOperationException | FileSystemException e) {
+                // Volumen sin enlaces duros (CIFS, FUSE…): el destino se crea de forma exclusiva y luego se llena
+                publicarSinEnlace(p, contenido);
             }
-        } catch (FileAlreadyExistsException e) {
-            throw e; // nunca se toca un archivo que ya existía
         } finally {
             Files.deleteIfExists(temporal);
         }
     }
 
-    private static void soloDueno(Path p) throws IOException {
-        if (p.getFileSystem().supportedFileAttributeViews().contains("posix")) {
-            Files.setPosixFilePermissions(p, PosixFilePermissions.fromString("rw-------"));
+    private static void publicarSinEnlace(Path p, byte[] contenido) throws IOException {
+        Files.createFile(p, soloDueno(p)); // falla con FileAlreadyExistsException si ya existe
+        try {
+            Files.write(p, contenido, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (IOException | RuntimeException e) {
+            Files.deleteIfExists(p); // no queda un archivo a medias
+            throw e;
         }
     }
 
     @Override
     public InputStream leer(String ruta) throws IOException {
-        return Files.newInputStream(real(resolver(ruta)));
+        // El archivo final no se sigue si es un enlace simbólico (revisión Java, BAJO 4)
+        return Files.newInputStream(dentro(resolver(ruta)), StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS);
     }
 
     @Override
     public OutputStream escribir(String ruta) throws IOException {
         Path p = carpeta(resolver(ruta));
-        OutputStream out = Files.newOutputStream(p, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
-        soloDueno(p);
-        return out;
+        Files.createFile(p, soloDueno(p)); // exclusivo y con 0600 desde que existe
+        try {
+            return Files.newOutputStream(p, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+        } catch (IOException | RuntimeException e) {
+            Files.deleteIfExists(p);
+            throw e;
+        }
     }
 
     @Override
     public void descartar(String ruta) {
         try {
-            Files.deleteIfExists(real(resolver(ruta)));
+            Files.deleteIfExists(dentro(resolver(ruta)));
         } catch (IOException | IllegalArgumentException e) {
             LOG.warn("[almacen] No se pudo descartar un archivo: {}", e.getMessage());
         }
@@ -109,7 +140,7 @@ public class AlmacenDisco implements Almacen {
 
     @Override
     public void verificar(String ruta, String sha256Esperado) throws IOException {
-        real(resolver(ruta)); // ruta inválida → IllegalArgumentException antes de abrir nada
+        dentro(resolver(ruta)); // ruta inválida → IllegalArgumentException antes de abrir nada
         Almacen.super.verificar(ruta, sha256Esperado);
     }
 }

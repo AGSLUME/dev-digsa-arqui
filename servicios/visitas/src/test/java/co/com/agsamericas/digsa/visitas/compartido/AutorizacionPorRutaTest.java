@@ -64,4 +64,19 @@ class AutorizacionPorRutaTest extends PruebaApi {
         ResultActions r = get("/api/catalogos/municipios?departamento=05", token(7_300_000_005L)).andExpect(status().isOk());
         assertThat(cuerpo(r)).isNotBlank();
     }
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.beans.factory.annotation.Qualifier("requestMappingHandlerMapping")
+    org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping mapeos;
+
+    /** Revisión Java de VA2.S (BAJO 9): la tabla es una lista de permitidos; toda ruta /api de un controlador debe tener su pantalla. */
+    @Test
+    void todaRutaApiTieneSuPantalla() {
+        java.util.List<String> sinPantalla = new java.util.ArrayList<>();
+        mapeos.getHandlerMethods().keySet().forEach(info -> info.getPatternValues().stream()
+                .filter(p -> p.startsWith("/api"))
+                .filter(p -> !AutorizacionPorRuta.SOLO_SESION.contains(p))
+                .filter(p -> AutorizacionPorRuta.PANTALLAS.keySet().stream().noneMatch(k -> p.equals(k) || p.startsWith(k + "/")))
+                .forEach(sinPantalla::add));
+        assertThat(sinPantalla).as("rutas /api sin pantalla en AutorizacionPorRuta.PANTALLAS").isEmpty();
+    }
 }

@@ -20,6 +20,10 @@ public class ConfiguracionArchivos {
     @ConditionalOnMissingBean
     @ConditionalOnProperty("lume.archivos.carpeta")
     Almacen almacen(@Value("${lume.archivos.carpeta}") String carpeta) {
+        if (carpeta == null || carpeta.isBlank()) {
+            // Vacía sería el directorio de trabajo: nunca (revisión Java de VA2.S, BAJO 7)
+            throw new IllegalStateException("lume.archivos.carpeta está vacía: declare la carpeta del volumen del servicio.");
+        }
         return new AlmacenDisco(Path.of(carpeta));
     }
 

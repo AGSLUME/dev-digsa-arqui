@@ -94,7 +94,8 @@ public class ValidadorArchivos {
         if (nombre == null) {
             return "";
         }
-        String limpio = nombre.replaceAll("[\\p{Cc}\\p{Cf}]", "");
+        // Control, formato (U+202E…), separadores de línea y párrafo, uso privado y sin asignar (revisión Java de VA2.S, BAJO 8)
+        String limpio = nombre.replaceAll("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\\p{Co}\\p{Cn}]", "");
         if (limpio.codePointCount(0, limpio.length()) <= MAX_NOMBRE_MOSTRADO) {
             return limpio;
         }
@@ -147,8 +148,11 @@ public class ValidadorArchivos {
                 }
                 String n = e.getName();
                 tipos |= "[Content_Types].xml".equals(n);
-                partes |= n.startsWith(carpeta);
-                if (n.endsWith("vbaProject.bin") || n.contains("/activeX/") || n.contains("/embeddings/")) {
+                partes |= n.replace('\\', '/').toLowerCase(java.util.Locale.ROOT).startsWith(carpeta);
+                // Los nombres de las partes OPC no distinguen mayúsculas: se comparan en minúsculas y con «/» (revisión Java de VA2.S, M3)
+                String parte = n.replace('\\', '/').toLowerCase(java.util.Locale.ROOT);
+                if (parte.endsWith("vbaproject.bin") || parte.contains("/activex/") || parte.contains("/embeddings/")
+                        || parte.contains("/externallinks/") || parte.contains("oleobject")) {
                     return false; // macros u objetos activos: no se admiten (seguridad, MEDIA 2; el monolito no lo revisaba)
                 }
                 for (int r; (r = in.read(buf)) > 0; ) {
