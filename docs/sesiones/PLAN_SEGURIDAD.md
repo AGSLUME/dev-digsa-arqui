@@ -50,6 +50,22 @@ Unidades, en este orden:
 - El gateway consume `sesion.cerrada` y `usuario.permisos_cambiados`: cierra la sesión o fuerza el refresco del token sin esperar a que venza.
 - **Copia de puntos y regionales** (de `visitas`) para validar ESM y OPL regional: tablas copia + consumidor idempotente (`mensajes_procesados`). Mientras `visitas` no publique, la validación falla cerrado (ver duda D5).
 - `/interno/usuarios/exportacion` (`client_credentials`) para la conciliación nocturna del monolito (S4) y para la carga inicial de `visitas` y `reportes`.
+- **Pedidos de la integradora (2026-11-06, oleada 2 de visitas):**
+  - **S2-OUTBOX, primera unidad y entrega aparte**: outbox de `librerias/comun` (tabla, publicador en la misma transacción y despachador) y los eventos `usuario.*` de `seguridad`. Visitas A y B dependen de ello para la copia de usuarios y para publicar sus propios eventos.
+  - `POST /interno/usuarios/importar` (carga masiva de maestros de visitas, fase VA2b):
+    - solo token de máquina, con alcance `seguridad:importar` y `aud=seguridad`;
+    - crea o actualiza usuarios con las reglas de `ServicioUsuarios` y de `ImportadorMaestros` del monolito;
+    - devuelve el resultado por fila;
+    - va en el contrato.
+  - **Forma de los eventos `usuario.*`** (integradora, 2026-11-06):
+    - Sobre de ADR-006: `{id, tipo, version, ocurrido, origen:"seguridad", traza, datos}`.
+    - `version` es la del agregado; el consumidor descarta las versiones menores o iguales a la que ya aplicó.
+    - `datos` es la foto completa del usuario: `uid`, `usuario`, `nombre`, `correo`, `activo`, `bloqueado`, `perfiles` (solo los directos), `roles [{id, base, pantallas}]`, `pantallas` efectivas, `alcance {fuerza, punto, regional}` y `asignados`.
+    - Sin documento, teléfono, hash de clave ni datos de sesión.
+    - `usuario.permisos_cambiados` lleva la misma foto.
+    - `sesion.cerrada {sid, uid, motivo}` lo consume el gateway.
+    - Todos se documentan en `contratos/eventos/seguridad.yaml`, con un ejemplo por evento.
+    - `/interno/usuarios/exportacion` devuelve la misma foto y la misma `version`.
 
 **Pruebas**: integración portada de `UsuariosYClavesApiTest`, `RolesApiTest`, `SesionesYClaveInicialApiTest` (administrador) y `CrearAdministradorTest`. Outbox con un RabbitMQ de Testcontainers (`rabbitmq:4.3.7-management` con digest), idempotencia y orden por versión.
 
@@ -75,7 +91,7 @@ Unidades, en este orden:
 
 - Trabajo sobre un **clon desechable** de digsa-java en mi scratchpad (`git clone --branch develop`), así el original no se toca. Monolito de prueba en el puerto 9150, contra mi gateway 9100.
 - Parche (ADR-008):
-  - Cadena *resource server* propia, sobre Boot 3.5 y sin `librerias/comun`, solo para `/api/analitica/**` y `/api/presupuesto/**`.
+  - Cadena *resource server* propia, sobre Boot 3.5 y sin `librerias/comun`, solo para `/api/analitica/**`, `/api/presupuesto/**` y `/api/homologacion/**` (26 rutas de analítica, enrutadas en el gateway desde b009640; pedido de la integradora del 2026-11-06).
   - JWT → `UsuarioSesion(uid, usuario, nombre)` con `PERFIL_*` solo de `perfiles`, más `Acceso(alcance, pantallas, asignados)`.
   - `/api/auth/**` y la cadena de sesión propia se desactivan para los usuarios migrados.
   - Sincronizador RabbitMQ de `usuario.*` sobre la copia de `usuarios`, `usuarios_perfiles` y `perfiles` con los mismos id.
