@@ -1,12 +1,14 @@
 openapi: 3.1.0
 info:
   title: LUME · seguridad
-  version: 0.4.0
+  version: 0.5.0
   description: |
     API del servicio `seguridad` (ADR-002, ADR-004, ADR-014), tal como la ve la SPA **a través del gateway** (mismo origen).
 
-    **Estado:** parcial (S1.0). Por ahora cubre el ingreso (`/api/auth/*`), la sesión (`/api/sesion*`), la cuenta propia
-    (`/api/cuenta/clave`) y la salida (`/bff/salir`, que es del gateway). Usuarios, roles y logs llegan en S2, S3 y S5.
+    **Estado:** parcial. Cubre el ingreso (`/api/auth/*`), la sesión (`/api/sesion*`), la cuenta propia
+    (`/api/cuenta/clave`), la salida (`/bff/salir`, del gateway), la administración de usuarios y roles (`/api/usuarios/**`, S2) y los
+    logs (`/api/logs/**`). **`/api/logs` se publica en 0.5.0 antes del código (S3)** para que el frontend avance; hasta entonces el servicio
+    responde 404 en esas rutas.
 
     **Paridad.** Rutas, cuerpos, códigos HTTP y textos son los del monolito (`digsa-java`: `identidad/ControladorIngreso`,
     `ControladorSesion`, `ControladorCuenta`, `ServicioIngreso`, `ServicioClaves`, `FiltroSesion`). Diferencias, todas justificadas:
@@ -57,6 +59,8 @@ tags:
     description: Rutas del gateway (BFF). No las implementa `seguridad`.
   - name: usuarios
     description: Administración de usuarios, roles adicionales, perfiles y tiempo de inactividad. Pantalla USUARIOS (solo Administrador).
+  - name: logs
+    description: Logs del sistema (Anexo 5, 3, ítem 15). Consulta, descarga y envío por correo. Pantalla LOGS (solo Administrador).
   - name: interno
     description: Solo red interna, para el gateway (tokens de máquina). No pasan por el gateway hacia afuera.
 paths:
@@ -516,6 +520,8 @@ paths:
       description: |
         Pantalla USUARIOS (solo Administrador). `sesionAbierta` = la que bloquearía un ingreso nuevo (decisión 7.1). `ultimoIngreso` en
         hora de Bogotá `yyyy-MM-dd HH:mm`. `perfiles` = ids asignados (perfiles base y roles adicionales).
+
+        Sin paginar, igual que el monolito: todos los usuarios en una respuesta (unos 300).
       security:
         - sesionGateway: []
       responses:
@@ -538,6 +544,8 @@ paths:
         `correoOk=false` y «Usuario creado, pero NO se pudo enviar el correo (…). Use «Restablecer contraseña» cuando el correo funcione.»).
         Con clave inicial: «Usuario creado con contraseña inicial. Entréguela al usuario por un canal seguro: deberá cambiarla en su primer
         ingreso.»
+
+        201 sin cabecera `Location`, igual que el monolito: el `id` va en el cuerpo.
       security:
         - sesionGateway: []
       requestBody:
@@ -794,7 +802,7 @@ paths:
       tags: [usuarios]
       operationId: crearRol
       summary: Crear un rol adicional
-      description: 201 «Rol creado. Asígnelo en el formulario de cada usuario.»
+      description: 201 «Rol creado. Asígnelo en el formulario de cada usuario.» Sin cabecera `Location`, igual que el monolito (el `id` va en el cuerpo).
       security:
         - sesionGateway: []
       requestBody:
@@ -909,6 +917,159 @@ paths:
           $ref: '#/components/responses/PaginaExpirada'
         '422':
           $ref: '#/components/responses/ValidacionRol'
+  /api/logs/opciones:
+    get:
+      tags: [logs]
+      operationId: opcionesLogs
+      summary: Opciones de los filtros de Logs
+      description: |
+        Igual que `GET /api/logs/opciones` del monolito (`auditoria/ControladorLogs`). `usuarios` son todos los usuarios, incluidos los
+        inactivos: la bitácora conserva su historia. `correoDefecto` es `""` si no está configurado.
+      security:
+        - sesionGateway: []
+      responses:
+        '200':
+          description: Opciones.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpcionesLogs'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermisoLogs'
+  /api/logs:
+    get:
+      tags: [logs]
+      operationId: listarLogs
+      summary: Logs del sistema, por páginas de 100
+      description: |
+        Igual que el monolito. Siempre se consulta por un rango de fechas en hora de Bogotá; sin fechas, los últimos 7 días hasta hoy. Si
+        las fechas vienen invertidas, se intercambian. Con `texto`, el periodo es de máximo 92 días. El orden va de lo más reciente a lo más
+        antiguo; la página siguiente se pide con `despuesFecha` y `despuesId` tomados de `siguiente`.
+
+        422: «La página pedida no es válida.» · «Para buscar por texto, use un periodo de máximo 92 días.» · «El tipo y el módulo son
+        palabras sin espacios (p. ej. usuario_editado o usuarios).»
+      security:
+        - sesionGateway: []
+      parameters:
+        - $ref: '#/components/parameters/LogsDesde'
+        - $ref: '#/components/parameters/LogsHasta'
+        - $ref: '#/components/parameters/LogsUsuarioId'
+        - $ref: '#/components/parameters/LogsOperacion'
+        - $ref: '#/components/parameters/LogsTexto'
+        - $ref: '#/components/parameters/LogsModulo'
+        - $ref: '#/components/parameters/LogsTipo'
+        - name: despuesFecha
+          in: query
+          required: false
+          description: '`siguiente.fecha` de la página anterior (ISO 8601 con zona, tal cual se recibió).'
+          schema: {type: string}
+        - name: despuesId
+          in: query
+          required: false
+          description: '`siguiente.id` de la página anterior.'
+          schema: {type: integer, format: int64}
+      responses:
+        '200':
+          description: Una página de registros.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaLogs'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermisoLogs'
+        '422':
+          $ref: '#/components/responses/ValidacionLogs'
+  /api/logs/exportar:
+    get:
+      tags: [logs]
+      operationId: exportarLogs
+      summary: Descargar los logs en Excel o CSV
+      description: |
+        Igual que el monolito. Exporta los mismos filtros que `GET /api/logs`, sin paginar. El archivo se llama
+        `logs_auditoria_yyyyMMdd_HHmm.xlsx` o `.csv` (hora de Bogotá) y va como adjunto (`Content-Disposition: attachment`).
+
+        Lleva un encabezado con el título «Logs de auditoría», la fecha de generación, quién lo generó y los filtros (`Periodo`,
+        `Usuario (id)`, `Operación`, `Texto`, `Módulo`, `Tipo`). Las columnas son `Fecha y hora`, `Usuario`, `Operación`, `Tipo`,
+        `Detalle`, `IP` y `Cambios (antes → después)`.
+
+        Un reporte incompleto no se entrega: con más de 200 000 registros responde 422 «El periodo tiene más de 200000 registros.
+        Acótelo (fechas, usuario u operación) y exporte de nuevo.»
+      security:
+        - sesionGateway: []
+      parameters:
+        - $ref: '#/components/parameters/LogsDesde'
+        - $ref: '#/components/parameters/LogsHasta'
+        - $ref: '#/components/parameters/LogsUsuarioId'
+        - $ref: '#/components/parameters/LogsOperacion'
+        - $ref: '#/components/parameters/LogsTexto'
+        - $ref: '#/components/parameters/LogsModulo'
+        - $ref: '#/components/parameters/LogsTipo'
+        - name: formato
+          in: query
+          required: false
+          description: '`xlsx` (por defecto) o `csv`.'
+          schema:
+            type: string
+            enum: [xlsx, csv]
+            default: xlsx
+      responses:
+        '200':
+          description: El archivo.
+          headers:
+            Content-Disposition:
+              description: '`attachment; filename="logs_auditoria_yyyyMMdd_HHmm.xlsx"` (o `.csv`).'
+              schema: {type: string}
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: {type: string, format: binary}
+            text/csv:
+              schema: {type: string, format: binary}
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermisoLogs'
+        '422':
+          $ref: '#/components/responses/ValidacionLogs'
+  /api/logs/enviar:
+    post:
+      tags: [logs]
+      operationId: enviarLogs
+      summary: Enviar los logs por correo
+      description: |
+        Igual que el monolito. Genera el mismo archivo que `GET /api/logs/exportar`, con los filtros del cuerpo, y lo envía adjunto a
+        `para`. Responde 200 «Reporte enviado a <para>.» y deja en la bitácora `reporte_enviado`, con el correo enmascarado.
+
+        422: «Escriba un correo válido para enviar el reporte.» · «Los reportes solo se envían a correos de: <dominios>.» · los mismos
+        de los filtros y del tope de 200 000 registros. 502: «No se pudo enviar el correo: <error>».
+      security:
+        - sesionGateway: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnvioLogs'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConMensaje'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermisoLogs'
+        '419':
+          $ref: '#/components/responses/PaginaExpirada'
+        '422':
+          $ref: '#/components/responses/ValidacionLogs'
+        '502':
+          description: "«No se pudo enviar el correo: <error>»"
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
   /interno/sesiones/{sid}:
     get:
       tags: [interno]
@@ -1017,6 +1178,48 @@ components:
       required: true
       description: Id del perfil o del rol adicional.
       schema: {type: integer, format: int32}
+    LogsDesde:
+      name: desde
+      in: query
+      required: false
+      description: Primer día, `yyyy-MM-dd` (hora de Bogotá). Sin él, hoy menos 7 días.
+      schema: {type: string, format: date}
+    LogsHasta:
+      name: hasta
+      in: query
+      required: false
+      description: Último día, incluido, `yyyy-MM-dd`. Sin él, hoy.
+      schema: {type: string, format: date}
+    LogsUsuarioId:
+      name: usuarioId
+      in: query
+      required: false
+      description: Id del usuario (de `opciones.usuarios`).
+      schema: {type: integer, format: int64}
+    LogsOperacion:
+      name: operacion
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/OperacionLog'
+    LogsTexto:
+      name: texto
+      in: query
+      required: false
+      description: Busca en el detalle. Con texto, el periodo es de máximo 92 días.
+      schema: {type: string, maxLength: 80}
+    LogsModulo:
+      name: modulo
+      in: query
+      required: false
+      description: Exacto (de `opciones.modulos`). Se pasa a minúsculas y debe cumplir `^[a-z0-9_.-]{1,50}$`.
+      schema: {type: string, maxLength: 50}
+    LogsTipo:
+      name: tipo
+      in: query
+      required: false
+      description: Exacto, p. ej. `usuario_editado`. Se pasa a minúsculas y debe cumplir `^[a-z0-9_.-]{1,50}$`.
+      schema: {type: string, maxLength: 50}
     Sid:
       name: sid
       in: path
@@ -1029,6 +1232,18 @@ components:
   responses:
     SinPermiso:
       description: «No tiene permiso para esta acción.» (la pantalla USUARIOS es solo del Administrador).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    SinPermisoLogs:
+      description: «No tiene permiso para esta acción.» (la pantalla LOGS es solo del Administrador).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    ValidacionLogs:
+      description: Filtros, página, tope de exportación o correo no válidos (textos del monolito en cada operación).
       content:
         application/problem+json:
           schema:
@@ -1474,3 +1689,129 @@ components:
         motivo:
           type: string
           enum: [salida, inactividad]
+    OperacionLog:
+      type: string
+      description: |
+        Operación de la bitácora. La pantalla muestra insercion → «Inserción», actualizacion → «Actualización», eliminacion →
+        «Eliminación», consulta → «Consulta», ingreso → «Ingreso» y salida → «Salida».
+      enum: [insercion, actualizacion, eliminacion, consulta, ingreso, salida]
+    UsuarioLog:
+      type: object
+      required: [id, nombre, usuario]
+      properties:
+        id: {type: integer, format: int64}
+        nombre: {type: string}
+        usuario: {type: string}
+    OpcionesLogs:
+      type: object
+      required: [operaciones, usuarios, modulos, correoDefecto]
+      properties:
+        operaciones:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperacionLog'
+        usuarios:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsuarioLog'
+        modulos:
+          type: array
+          description: Módulos que aparecen en la bitácora.
+          items: {type: string}
+        correoDefecto:
+          type: string
+          description: Correo sugerido para «Enviar por correo»; `""` si no hay.
+    CambioLog:
+      type: object
+      required: [campo, oculto]
+      properties:
+        campo: {type: string}
+        antes: {type: [string, 'null']}
+        despues: {type: [string, 'null']}
+        oculto:
+          type: boolean
+          description: |
+            Dato personal (Ley 1581): no se guarda el valor y `antes` y `despues` son nulos. La pantalla muestra «Modificado (dato personal:
+            no se guarda el valor, Ley 1581)». Si los cambios guardados no se pueden leer llega un único `{campo: "(cambios ilegibles)",
+            oculto: true}`.
+    FilaLog:
+      type: object
+      required: [id, fecha, fechaLlave, operacion, tipo, descripcion]
+      properties:
+        id: {type: integer, format: int64}
+        fecha:
+          type: string
+          description: Hora de Bogotá, `yyyy-MM-dd HH:mm:ss`.
+        fechaLlave:
+          type: string
+          description: El instante exacto (ISO 8601 con zona), para el cursor.
+        usuario: {type: [string, 'null']}
+        operacion:
+          $ref: '#/components/schemas/OperacionLog'
+        tipo:
+          type: string
+          description: P. ej. `usuario_editado` o `login`.
+        modulo: {type: [string, 'null']}
+        servicio:
+          type: [string, 'null']
+          description: Servicio que originó el registro (nuevo respecto al monolito; `null` en los registros migrados).
+        descripcion: {type: string}
+        ip: {type: [string, 'null']}
+        cambios:
+          type: [array, 'null']
+          description: Antes y después de cada campo que cambió, o `null` si el registro no tiene cambios.
+          items:
+            $ref: '#/components/schemas/CambioLog'
+    CursorLogs:
+      type: object
+      required: [fecha, id]
+      properties:
+        fecha:
+          type: string
+          description: Se envía tal cual como `despuesFecha`.
+        id:
+          type: integer
+          format: int64
+          description: Se envía como `despuesId`.
+    PaginaLogs:
+      type: object
+      required: [filas, desde, hasta]
+      properties:
+        filas:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/FilaLog'
+        siguiente:
+          description: Cursor de la página siguiente, o `null` si no hay más.
+          oneOf:
+            - $ref: '#/components/schemas/CursorLogs'
+            - type: 'null'
+        desde:
+          type: string
+          format: date
+          description: El periodo que se aplicó (ya normalizado).
+        hasta:
+          type: string
+          format: date
+    EnvioLogs:
+      type: object
+      required: [para]
+      properties:
+        desde: {type: [string, 'null'], format: date}
+        hasta: {type: [string, 'null'], format: date}
+        usuarioId: {type: [integer, 'null'], format: int64}
+        operacion:
+          oneOf:
+            - $ref: '#/components/schemas/OperacionLog'
+            - type: 'null'
+        texto: {type: [string, 'null'], maxLength: 80}
+        modulo: {type: [string, 'null'], maxLength: 50}
+        tipo: {type: [string, 'null'], maxLength: 50}
+        formato:
+          type: [string, 'null']
+          enum: [xlsx, csv, null]
+          description: Por defecto `xlsx` (la pantalla siempre envía `xlsx`).
+        para:
+          type: string
+          description: Correo de destino; solo de los dominios permitidos para reportes.

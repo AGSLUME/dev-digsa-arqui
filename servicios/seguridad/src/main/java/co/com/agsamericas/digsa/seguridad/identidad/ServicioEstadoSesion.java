@@ -25,7 +25,8 @@ public class ServicioEstadoSesion {
 
     /**
      * Holgura sobre la actividad informada: el gateway la informa como máximo cada 30 s ({@code FiltroSesionLume.INFORMAR_CADA_MS}) y
-     * marca el informe antes de enviarlo, así que uno perdido la atrasa hasta 60 s. Si cambia ese intervalo, este margen debe ser el doble.
+     * marca el informe antes de enviarlo, así que uno perdido la atrasa hasta 60 s. {@code MargenInactividadTest} exige que sea al menos el
+     * doble de ese intervalo.
      */
     static final Duration MARGEN_INFORME = Duration.ofSeconds(60);
 

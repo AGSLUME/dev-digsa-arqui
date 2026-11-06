@@ -35,6 +35,7 @@ class FiltroSesionLume implements GlobalFilter, Ordered {
     static final String ULTIMO = "lume.sesion.ultimo";
     static final String INFORMADO = "lume.sesion.informado";
     static final String ESTADO = "/api/sesion/estado";
+    /** Amarrado a {@code ServicioEstadoSesion.MARGEN_INFORME} de seguridad (≥ el doble): lo comprueba {@code MargenInactividadTest}. */
     private static final long INFORMAR_CADA_MS = 30_000;
 
     private final ClienteSeguridad seguridad;
