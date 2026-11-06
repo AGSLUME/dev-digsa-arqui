@@ -1,0 +1,161 @@
+asyncapi: 3.0.0
+info:
+  title: LUME · eventos de notificaciones
+  version: 0.1.0
+  description: |
+    Eventos que publica el servicio `notificaciones` (ADR-006) por su outbox (`librerias/comun`, paquete `eventos`), y forma de los
+    eventos que consume.
+
+    **Topología.**
+    - Exchange `topic` durable `notificaciones.eventos` (con `alternate-exchange` = `notificaciones.sin-ruta`), routing key = `tipo`.
+    - Claves que se enlazan (matriz de `infra/rabbitmq/usuarios.sh`):
+      - `envio.#`: visitas (`visitas.envios`), para saber si salió el correo del acta (D-N1).
+      - `auditoria.#`: seguridad, para la bitácora.
+
+    **Entrega «al menos una vez».**
+    - El consumidor es idempotente por `id`.
+    - Valida que `origen` = `notificaciones` llegue por `notificaciones.eventos`.
+
+    **Orden.**
+    - `envio.resultado` lleva `version` = número de intentos del envío.
+    - La `referencia` la elige quien publicó el aviso y se devuelve **tal cual** (p. ej. `acta:15:2`, donde el último número es el envío
+      1, 2… de cada reenvío). Así visitas descarta el resultado atrasado de un intento anterior.
+
+    **Datos personales.** `envio.resultado` no lleva destinatarios, asunto ni cuerpo. `ultimoError` va sin direcciones (`[correo]`) y
+    se corta a 500 caracteres.
+
+    ---
+
+    **Lo que consume `notificaciones`** (lo publican otros servicios y lo documenta su contrato; aquí va la forma que espera
+    `notificaciones`, acordada por la integradora).
+
+    1. **`aviso.<tipo>`** en `visitas.eventos` (cola `notificaciones.avisos`). Un hecho que hay que comunicar por correo. Entra por la
+       bandeja, con reintentos.
+
+       Campos de `datos`:
+       - `referencia` (string ≤ 120, sin datos personales, p. ej. `acta:15:1`). Se devuelve en `envio.resultado`.
+       - `plantilla` (clave de una plantilla de `notificaciones`).
+       - `variables` (objeto texto → texto), **nunca secretas**.
+       - `bloques` (objeto texto → HTML de lista blanca, opcional).
+       - `para` y `copia` (correos; para es obligatorio, 1..500; la bandeja parte de a 100).
+       - `critico` (booleano, opcional).
+       - `secretoEn` (opcional): ruta `/interno/...` del servicio de origen donde `notificaciones` pide, **en cada intento**, lo que no
+         puede viajar por RabbitMQ: los valores secretos y los adjuntos. Patrón T1 de visitas-b. Para el acta es
+         `GET /interno/avisos/acta/{id}` (alcance `visitas:avisos`). Nada de eso se guarda, salvo el enlace **oculto** en el registro.
+
+       Tipos conocidos (de los encolados del monolito y D-N1):
+       - `aviso.acta_generada`;
+       - `aviso.solicitud_nueva`, `aviso.solicitud_agendada` y `aviso.solicitud_cancelada`;
+       - `aviso.recordatorio_seguimiento`.
+
+       Un tipo nuevo se pide a la integradora. El `origen` en la bitácora es el `<tipo>` sin `aviso.`, salvo `acta_generada` → `acta`.
+
+       **Resultado:** solo los avisos con `referencia` publican `envio.resultado`, al quedar `enviado` o `parcial` (estado `enviado`) o
+       al agotarse (estado `agotado`).
+
+    2. **`alerta.<tipo>`** en `visitas.eventos` y `reportes.eventos` (cola `notificaciones.alertas`). Dispara una alerta del catálogo.
+       - Campos de `datos`: `clave` (string 1..120: identifica el problema; la alerta crítica abierta es única por `tipo`+`clave`) y
+         `detalle` (string ≤ 500, **sin datos personales**).
+       - Tipos que existen hoy:
+         - `intervencion_inmediata`, `plan_opl_vencido`, `tarea_diaria_fallida` e `integridad_archivo` (visitas);
+         - `reporte_lento` (reportes).
+       - Un `tipo` que no está en el catálogo se registra en el log (sin el detalle) y se descarta. No va a la DLQ.
+
+    3. **`usuario.*` y `cuenta.bloqueada`** en `seguridad.eventos` (cola `notificaciones.usuarios`; `contratos/eventos/seguridad.yaml`).
+       - De la foto se guardan solo `uid`, `usuario`, `nombre`, `correo`, `activo` y `perfiles`, para los destinatarios de las alertas.
+         El resto se descarta.
+       - `cuenta.bloqueada` cuenta para la alerta `bloqueo_masivo`: N o más cuentas bloqueadas en la última hora, con
+         N = `alertas_bloqueo_cuentas` (5 por defecto; 0 la desactiva).
+
+defaultContentType: application/json
+
+channels:
+  envio.resultado:
+    address: envio.resultado
+    description: Resultado final del correo de un aviso que llegó con `referencia`.
+    messages:
+      EventoEnvio:
+        $ref: '#/components/messages/EventoEnvio'
+  auditoria:
+    address: 'auditoria.{tipo}'
+    description: |
+      Auditoría de lo que hace `notificaciones`. Va por el outbox con `PublicadorAuditoria` de `comun`, con el formato de
+      `EventoAuditoria`, y la consume seguridad. Tipos, los mismos del monolito:
+      - de correos: `correo_destinatarios_vistos`, `correo_reintentado`, `correo_plantilla_editada`, `correo_plantilla_restaurada`,
+        `correo_destinatarios_editados`, `correo_fallido`, `sms_fallido`, `correos_purgados`;
+      - de alertas: `alerta_critica`, `alerta_operativa`, `alerta_cerrada`, `alerta_catalogo_editado`;
+      - y las acciones `/api/**`.
+    parameters:
+      tipo:
+        description: Tipo de auditoría.
+
+operations:
+  publicarEnvioResultado:
+    action: send
+    channel: { $ref: '#/channels/envio.resultado' }
+
+components:
+  messages:
+    EventoEnvio:
+      name: EventoEnvio
+      summary: Sobre de ADR-006 con el resultado del envío.
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Sobre'
+          - type: object
+            properties:
+              tipo: { const: envio.resultado }
+              datos: { $ref: '#/components/schemas/ResultadoEnvio' }
+      examples:
+        - name: acta enviada
+          payload:
+            id: 0b9a6f2e-1c3d-4e5f-8a7b-6c5d4e3f2a1b
+            tipo: envio.resultado
+            version: 1
+            ocurrido: '2026-11-06T17:31:05Z'
+            origen: notificaciones
+            traza: null
+            datos:
+              referencia: 'acta:15:1'
+              estado: enviado
+              intentos: 1
+              ultimoError: null
+        - name: acta agotada
+          payload:
+            id: 7e6d5c4b-3a2f-4e1d-9c8b-0a1f2e3d4c5b
+            tipo: envio.resultado
+            version: 5
+            ocurrido: '2026-11-06T20:02:40Z'
+            origen: notificaciones
+            traza: null
+            datos:
+              referencia: 'acta:15:1'
+              estado: agotado
+              intentos: 5
+              ultimoError: No se pudo conectar con el servidor de correo.
+  schemas:
+    Sobre:
+      type: object
+      required: [id, tipo, version, ocurrido, origen, datos]
+      properties:
+        id: { type: string, format: uuid, description: Llave de idempotencia del consumidor. }
+        tipo: { type: string, pattern: '^[a-z_]+(\.[a-z_]+)+$', description: Igual a la routing key. }
+        version: { type: integer, format: int64 }
+        ocurrido: { type: string, format: date-time }
+        origen: { type: string, const: notificaciones }
+        traza: { type: [string, 'null'], description: 'traceId W3C, si lo había.' }
+        datos: { type: object }
+    ResultadoEnvio:
+      type: object
+      required: [referencia, estado, intentos]
+      properties:
+        referencia: { type: string, maxLength: 120, description: 'La del aviso, tal cual llegó.' }
+        estado:
+          type: string
+          enum: [enviado, agotado]
+          description: |
+            - `enviado`: salió a todos los destinatarios o a parte de ellos. Un rechazo parcial no se reintenta (paridad); el detalle
+              queda en la bitácora de Correos.
+            - `agotado`: falló en los 5 intentos. Si el aviso era crítico, además dispara la alerta `correo_agotado`.
+        intentos: { type: integer, minimum: 1, maximum: 5 }
+        ultimoError: { type: [string, 'null'], maxLength: 500 }
