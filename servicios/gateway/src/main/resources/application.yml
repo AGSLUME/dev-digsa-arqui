@@ -16,8 +16,9 @@ spring:
       username: ${REDIS_USUARIO_GATEWAY:gateway}
       password: ${REDIS_CLAVE_GATEWAY:}
   session:
-    # Inactividad provisional; en S1/S2 el gateway la toma del parámetro de seguridad (ADR-004).
-    timeout: ${LUME_MINUTOS_SESION:15}m
+    # La inactividad la mide FiltroSesionLume con los minutos de seguridad (parámetro del administrador, 1 a 480; ADR-004). Esta es solo
+    # la vida máxima en Redis de una sesión abandonada: 480 + 5 minutos, como el (minutos + 5) del monolito.
+    timeout: ${LUME_MINUTOS_SESION_REDIS:485}m
     data:
       redis:
         # Debe quedar bajo "lume:*": es el único prefijo que la ACL de Redis permite al usuario gateway (ADR-009).
@@ -34,6 +35,14 @@ spring:
             authorization-grant-type: authorization_code
             redirect-uri: "{baseUrl}/bff/login/oauth2/code/{registrationId}"
             scope: openid,profile
+          # Token de máquina del propio gateway para /interno/sesiones de seguridad (estado, actividad, cierre; ADR-004).
+          lume-interno:
+            provider: lume
+            client-id: gateway
+            client-secret: ${LUME_GATEWAY_SECRETO:}
+            client-authentication-method: client_secret_basic
+            authorization-grant-type: client_credentials
+            scope: seguridad:sesiones
         provider:
           lume:
             # El navegador va al emisor por la URL pública (el propio gateway); el gateway habla con seguridad por la red interna.
@@ -53,11 +62,42 @@ spring:
             # El gateway FIJA X-Forwarded-For con la IP que él ve; no añade a lo que mande el cliente (ADR-003).
             for-append: false
           routes:
-            # Emisor OIDC (seguridad). Va sin TokenRelay: el navegador inicia sesión allí.
+            # Emisor OIDC (seguridad). Va sin TokenRelay: el navegador inicia sesión allí. Solo viaja la cookie LUME_IDP (ADR-014).
+            # Al público solo lo que usa el navegador (revisión de seguridad, M4): autorizar, la JWKS y el descubrimiento. Con límite por
+            # IP: cada /oauth2/authorize anónimo crea una sesión del emisor en base.
             - id: seguridad-emisor
               uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}
               predicates:
-                - Path=/login,/oauth2/**,/.well-known/**,/userinfo,/connect/**
+                - Path=/oauth2/authorize,/oauth2/jwks,/.well-known/**
+              filters:
+                - SoloCookieEmisor=
+                - LimiteIngreso=
+            # Token, introspección, revocación, device, userinfo y logout del emisor: solo por la red interna (el gateway los usa por
+            # LUME_SEGURIDAD_URL). Desde afuera, 404.
+            - id: seguridad-emisor-interno
+              uri: no://op
+              predicates:
+                - Path=/oauth2/**,/userinfo,/connect/**
+              filters:
+                - SetStatus=404
+            # Ingreso (ADR-014): público, con CSRF (cadena del gateway) y límite de tasa por IP y por usuario. Sin TokenRelay; solo LUME_IDP.
+            - id: seguridad-ingreso
+              uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}
+              predicates:
+                - Path=/api/auth/**
+              filters:
+                - RemoveRequestHeader=Authorization
+                - SoloCookieEmisor=
+                - LimiteIngreso=
+            # Sesión y cuenta propia (seguridad), con el token del usuario.
+            - id: seguridad-api
+              uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}
+              predicates:
+                - Path=/api/sesion,/api/sesion/**,/api/cuenta/**
+              filters:
+                - TokenRelay=
+                - RemoveRequestHeader=Cookie
+                - RemoveResponseHeader=Set-Cookie
             - id: hola
               uri: ${LUME_HOLA_URL:http://localhost:9109}
               predicates:
@@ -83,6 +123,9 @@ spring:
               order: 1000
               predicates:
                 - Path=/**
+              filters:
+                # Los archivos de la SPA no necesitan cookies: LUME_SESION y LUME_IDP no salen hacia el servidor de Angular (revisión B-f)
+                - RemoveRequestHeader=Cookie
 
 management:
   endpoints:

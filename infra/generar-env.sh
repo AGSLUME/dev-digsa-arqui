@@ -24,6 +24,11 @@ clave() {
   if [[ "$ejemplo" == "--ejemplo" ]]; then echo "<generada-por-generar-env.sh>"; else openssl rand -hex 24; fi
 }
 
+# Clave AES-256 en base64 (32 bytes): cifra las claves de firma del emisor en la tabla jwk.
+clave_aes() {
+  if [[ "$ejemplo" == "--ejemplo" ]]; then echo "<generada-por-generar-env.sh>"; else openssl rand -base64 32; fi
+}
+
 gw=$((9000 + d))
 secreto_gateway="$(clave)"
 secreto_humo="$(clave)"
@@ -90,6 +95,9 @@ LUME_HUMO_SECRETO_CODIFICADO='{noop}$secreto_humo'
 LUME_USUARIO_DEV=dev.$sesion
 LUME_CLAVE_DEV=$(clave)
 LUME_PERFIL_DEV=ADMINISTRADOR
+
+# Emisor (S1): clave AES-256 que cifra las claves de firma en la tabla jwk. Vault en el cierre (I9).
+LUME_JWK_CLAVE=$(clave_aes)
 EOF
 )
 

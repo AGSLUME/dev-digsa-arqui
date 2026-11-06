@@ -23,9 +23,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Valores solo de prueba (ficticios), no son secretos de ningún entorno. */
-@ActiveProfiles("local")
+@ActiveProfiles({"local", "prueba"})
+@org.springframework.context.annotation.Import(co.com.agsamericas.digsa.seguridad.soporte.ContenedoresPrueba.class)
 @SpringBootTest(properties = {
-        "LUME_GATEWAY_SECRETO_CODIFICADO={noop}gateway-solo-prueba",
         "LUME_HUMO_SECRETO_CODIFICADO={noop}humo-solo-prueba",
         "LUME_USUARIO_DEV=dev.prueba",
         "LUME_CLAVE_DEV=Clave-Solo-Prueba-1"})
@@ -44,7 +44,8 @@ class EmisorTest {
     @Test
     void laSaludEsPublicaYElRestoPideIngreso() throws Exception {
         mvc.perform(get("/actuator/health/readiness")).andExpect(status().isOk());
-        mvc.perform(get("/cualquier-cosa").accept(MediaType.TEXT_HTML)).andExpect(status().is3xxRedirection());
+        // Lo no declarado queda cerrado por la cadena de recurso de lume-comun.
+        mvc.perform(get("/cualquier-cosa").accept(MediaType.TEXT_HTML)).andExpect(status().is4xxClientError());
     }
 
     @Test
@@ -55,19 +56,20 @@ class EmisorTest {
     }
 
     @Test
-    void clientCredentialsEmiteUnTokenConAudienciaLume() throws Exception {
+    void clientCredentialsEmiteUnTokenConLaAudienciaDelServicioDelAlcance() throws Exception {
         String basico = Base64.getEncoder().encodeToString("humo:humo-solo-prueba".getBytes(StandardCharsets.UTF_8));
         String cuerpo = mvc.perform(post("/oauth2/token")
                         .header(HttpHeaders.AUTHORIZATION, "Basic " + basico)
                         .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                        .content("grant_type=client_credentials&scope=lume.humo"))
+                        .content("grant_type=client_credentials&scope=hola:humo"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         JsonMapper json = JsonMapper.builder().build();
         String token = json.readTree(cuerpo).get("access_token").asString();
         JsonNode claims = json.readTree(Base64.getUrlDecoder().decode(token.split("\\.")[1]));
-        assertThat(claims.get("aud").toString()).contains("lume");
-        assertThat(claims.get("scope").toString()).contains("lume.humo");
+        // Token de máquina: su audiencia es solo el servicio del alcance (hola:humo → hola), nunca la lista de los de usuario
+        assertThat(claims.get("aud").toString()).contains("hola").doesNotContain("gateway", "seguridad", "monolito");
+        assertThat(claims.get("scope").toString()).contains("hola:humo");
         assertThat(claims.has("perfiles")).isFalse();
     }
 
@@ -89,6 +91,6 @@ class EmisorTest {
                         + "&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256")
                         .accept(MediaType.TEXT_HTML)) // como un navegador: sin text/html el emisor responde 401
                 .andExpect(status().is3xxRedirection())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl("/login"));
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl("/ingreso"));
     }
 }

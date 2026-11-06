@@ -19,7 +19,8 @@ spring:
           # El emisor es la URL pública del gateway (ADR-004); las claves se piden por la red interna.
           issuer-uri: ${LUME_EMISOR:http://localhost:9000}
           jwk-set-uri: ${LUME_SEGURIDAD_URL:http://localhost:9101}/oauth2/jwks
-          audiences: lume
+          # Audiencia por destinatario (ADR-004, PENDIENTES_I1 bloqueante 3): hola solo acepta tokens dirigidos a él.
+          audiences: hola
 
 management:
   endpoints:
