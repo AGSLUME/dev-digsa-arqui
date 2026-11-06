@@ -72,3 +72,11 @@ tema seguridad visitas.eventos "$NADA" '^(auditoria|punto|regional|fuerza)\..*$'
 
 touch /var/lib/rabbitmq/.usuarios-lume-listos
 echo "usuarios.sh: usuarios de servicio y matriz de lectura listos"
+
+# Si alguien borra y vuelve a declarar un <origen>.eventos, RabbitMQ pierde sus permisos por tema y quedaría abierto: la matriz se
+# reaplica cada 5 minutos (es idempotente). Solo en el proceso de arranque (LUME_REAPLICAR=1); a mano se corre una sola vez.
+if [ "${LUME_REAPLICAR:-1}" = "1" ] && [ "${1:-}" != "--una-vez" ]; then
+  while sleep 300; do
+    LUME_REAPLICAR=0 sh "$0" --una-vez >/dev/null 2>&1 || echo "usuarios.sh: falló la reaplicación de la matriz" >&2
+  done
+fi
