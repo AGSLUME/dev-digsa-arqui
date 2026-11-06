@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { ADMIN, crearUsuario, escribirCodigo, ingresar, paso1, reiniciarMock, salir, unico } from './apoyo';
+import { ADMIN, DOMINIO, escribirCodigo, filaDeUsuario, ingresar, paso1, reiniciarMock, salir, unico } from './apoyo';
 
 // Portado de digsa-java/e2e/pruebas/sesion.spec.ts (a su vez de tests/ui/ui_sesion.js): ingreso, aviso de inactividad, «Seguir
 // conectado», cierre por inactividad y sesión única. Mismos casos y aserciones; cambian los selectores y que el código llega por correo.
@@ -73,12 +73,20 @@ test('sesión única (decisión 7.1): con una sesión abierta el ingreso desde o
 });
 
 test('contraseña inicial y cierre por el administrador: el usuario la cambia al entrar; el administrador cierra su sesión', async ({ page, browser }) => {
-  // El monolito crea el usuario y cierra su sesión desde la pantalla Usuarios, que se porta en A5. Hasta entonces la primera parte (el
-  // cambio de la contraseña inicial en el ingreso) se prueba completa; el cierre por el administrador queda pendiente de A5.
-  test.fixme(true, 'Pendiente de A5: la pantalla Usuarios (crear con contraseña inicial y «Cerrar la sesión de…»)');
   await ingresar(page, ...ADMIN);
+  await page.getByRole('link', { name: 'Usuarios' }).click();
+  await page.getByRole('button', { name: 'Nuevo usuario' }).click();
   const usuario = unico('inicial');
-  await crearUsuario({ usuario, nombre: 'Usuario Inicial de Prueba', perfiles: ['Coordinador'], claveInicial: 'Inicial.Asignada.2026' });
+  const dialogo = page.getByRole('dialog');
+  await dialogo.getByLabel('Nombre completo').fill('Usuario Inicial de Prueba');
+  await dialogo.getByLabel('Usuario').fill(usuario);
+  await dialogo.getByLabel('Correo').fill(`${usuario}${DOMINIO}`);
+  await dialogo.getByLabel('Coordinador', { exact: true }).check();
+  await dialogo.getByText('Asignar contraseña inicial (se cambia al primer ingreso)').click();
+  await dialogo.getByRole('textbox', { name: 'Contraseña inicial' }).fill('Inicial.Asignada.2026');
+  await dialogo.getByRole('button', { name: 'Guardar' }).click();
+  await expect(page.getByText(/Usuario creado con contraseña inicial/)).toBeVisible();
+
   const otro = await browser.newContext();
   const p2 = await otro.newPage();
   await paso1(p2, usuario, 'Inicial.Asignada.2026');
@@ -88,5 +96,14 @@ test('contraseña inicial y cierre por el administrador: el usuario la cambia al
   await p2.getByRole('button', { name: 'Cambiar contraseña y continuar' }).click();
   await escribirCodigo(p2, usuario, desde);
   await expect(p2.getByRole('button', { name: 'Salir', exact: true })).toBeVisible();
+
+  await page.reload();
+  const fila = await filaDeUsuario(page, usuario);
+  await expect(fila.getByText('Sesión abierta')).toBeVisible();
+  page.once('dialog', (d) => void d.accept());
+  await fila.getByRole('button', { name: /Cerrar la sesión de/ }).click();
+  await expect(page.getByText('Sesión cerrada.')).toBeVisible();
+  await p2.reload();
+  await expect(p2.getByTestId('motivo-cierre')).toContainText('Su sesión fue cerrada');
   await otro.close();
 });

@@ -6,7 +6,10 @@ import { expect, type Page } from '@playwright/test';
  *   usuarios de esta sesión usan @angular.prueba.local, así no se mezcla con los correos de otras sesiones);
  * - el captcha es Turnstile con la clave de PRUEBA pública de Cloudflare: se espera a que el widget deje su respuesta;
  * - «Salir» es POST /bff/salir (ADR-014);
- * - los usuarios de prueba se crean por el control del mock (`/__mock/usuarios`) hasta que el contrato de usuarios tenga POST /api/usuarios.
+ * - el enlace para definir la contraseña llega solo por correo (el monolito lo mostraba en el aviso, «(local: …)»): se lee de Mailpit;
+ * - los selectores (Select de Mantine) son combobox ARIA: `getByRole('combobox', { name })` en lugar de `textbox`;
+ * - `crearUsuario` crea por el control del mock (`/__mock/usuarios`) a los usuarios que una prueba necesita sin pasar por la pantalla
+ *   Usuarios; las pruebas de esa pantalla crean por ella o por POST /api/usuarios, como el monolito.
  */
 
 export const MAILPIT = process.env.DIGSA_E2E_MAILPIT ?? 'http://127.0.0.1:8025';
@@ -56,6 +59,14 @@ export async function ultimoCorreo(destinatario: string, desde: number): Promise
     .toBeTruthy();
   const m = (await (await fetch(`${MAILPIT}/api/v1/message/${id}`)).json()) as { Subject: string; Text: string };
   return { asunto: m.Subject, texto: m.Text };
+}
+
+/** El enlace para definir la contraseña del último correo para `destinatario` (bienvenida o restablecer). */
+export async function enlaceDelCorreo(destinatario: string, desde: number): Promise<string> {
+  const { texto } = await ultimoCorreo(destinatario, desde);
+  const enlace = /(https?:\/\/\S+\/definir-clave\?tkn=[a-f0-9]{64})/.exec(texto)?.[1];
+  expect(enlace, 'el correo trae el enlace').toBeTruthy();
+  return enlace!;
 }
 
 /** El código de 6 dígitos del último correo de verificación para el usuario. */
@@ -139,6 +150,12 @@ export async function salir(page: Page): Promise<void> {
 
 export function unico(prefijo: string): string {
   return `${prefijo}${Date.now() % 1_000_000}${Math.floor(Math.random() * 100)}`;
+}
+
+/** La fila del usuario en la pantalla Usuarios: lo busca con «Buscar» (puede estar en otra página de la tabla). */
+export async function filaDeUsuario(page: Page, usuario: string) {
+  await page.getByLabel('Buscar', { exact: true }).fill(usuario);
+  return page.getByTestId('usuario-' + usuario);
 }
 
 /** Sin desplazamiento horizontal de la página. */

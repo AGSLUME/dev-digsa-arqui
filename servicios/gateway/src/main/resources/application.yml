@@ -111,7 +111,7 @@ spring:
             - id: monolito
               uri: ${DIGSA_MONOLITO_URL:http://localhost:9050}
               predicates:
-                - Path=/api/analitica/**,/api/presupuesto/**
+                - Path=/api/analitica/**,/api/homologacion/**,/api/presupuesto/**
               filters:
                 - TokenRelay=
                 - RemoveRequestHeader=Cookie

@@ -11,7 +11,7 @@
     "watch": "ng build --watch --configuration development",
     "pretest": "npm run api",
     "test": "ng test",
-    "test:mock": "node --test mock/servidor.test.mjs",
+    "test:mock": "node --test mock/servidor.test.mjs mock/usuarios.test.mjs mock/logs.test.mjs",
     "lint": "ng lint"
   },
   "private": true,

@@ -1,4 +1,5 @@
 import { Routes } from '@angular/router';
+import { pantalla } from './nucleo/guardas';
 
 /**
  * Pantallas de los módulos dentro del shell (con sesión). Cada sesión de módulo agrega aquí SUS rutas, una por pantalla de
@@ -12,7 +13,9 @@ import { Routes } from '@angular/router';
  * que una más general si comparten prefijo.
  */
 export const RUTAS_DE_MODULOS: Routes = [
-  // --- seguridad (A5: usuarios, roles, logs) ---
+  // --- seguridad (A5: usuarios, roles adicionales y logs) ---
+  { path: 'usuarios', canMatch: [pantalla('usuarios')], loadComponent: () => import('./paginas/seguridad/usuarios').then((m) => m.Usuarios) },
+  { path: 'logs', canMatch: [pantalla('logs')], loadComponent: () => import('./paginas/seguridad/logs').then((m) => m.Logs) },
   // --- visitas ---
   // --- reportes ---
 ];

@@ -7,19 +7,40 @@ const PUERTO = Number(process.env.DIGSA_MOCK_SMTP_PUERTO ?? 1025);
 /** Codificación de un encabezado con tildes (RFC 2047). */
 const encabezado = (t) => `=?UTF-8?B?${Buffer.from(t, 'utf8').toString('base64')}?=`;
 
-/** Envía un correo de texto. Rechaza si Mailpit no responde (el mock lo traduce a 502, como el monolito). */
-export function enviarCorreo({ para, asunto, texto }) {
-  const mensaje = [
+const base64 = (b) => Buffer.from(b).toString('base64').replace(/.{1,76}/g, '$&\r\n');
+
+/**
+ * Envía un correo de texto, con adjuntos opcionales (`[{ nombre, tipo, contenido: Buffer }]`, p. ej. el Excel de los logs). Rechaza si
+ * Mailpit no responde (el mock lo traduce a 502, como el monolito).
+ */
+export function enviarCorreo({ para, asunto, texto, adjuntos = [] }) {
+  const cabeceras = [
     'From: LUME Suite DIGSA <no-responder@angular.prueba.local>',
     `To: <${para}>`,
     `Subject: ${encabezado(asunto)}`,
     `Date: ${new Date().toUTCString()}`,
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=UTF-8',
-    'Content-Transfer-Encoding: base64',
-    '',
-    Buffer.from(texto, 'utf8').toString('base64').replace(/.{1,76}/g, '$&\r\n'),
-  ].join('\r\n');
+  ];
+  const cuerpoTexto = ['Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', base64(Buffer.from(texto, 'utf8'))];
+  let mensaje;
+  if (adjuntos.length === 0) {
+    mensaje = [...cabeceras, ...cuerpoTexto].join('\r\n');
+  } else {
+    const limite = `limite-${Date.now().toString(36)}`;
+    // El nombre del adjunto va entre comillas en las cabeceras: sin comillas ni saltos de línea (inyección de cabeceras)
+    const seguro = (n) => String(n).replace(/["\r\n\\]/g, '_');
+    const partes = adjuntos.map((a) =>
+      [
+        `--${limite}`,
+        `Content-Type: ${a.tipo}; name="${seguro(a.nombre)}"`,
+        `Content-Disposition: attachment; filename="${seguro(a.nombre)}"`,
+        'Content-Transfer-Encoding: base64',
+        '',
+        base64(a.contenido),
+      ].join('\r\n'),
+    );
+    mensaje = [...cabeceras, `Content-Type: multipart/mixed; boundary="${limite}"`, '', `--${limite}`, ...cuerpoTexto, ...partes, `--${limite}--`].join('\r\n');
+  }
   const pasos = ['EHLO mock-angular', 'MAIL FROM:<no-responder@angular.prueba.local>', `RCPT TO:<${para}>`, 'DATA', `${mensaje}\r\n.`, 'QUIT'];
   return new Promise((resolver, rechazar) => {
     const s = connect(PUERTO, HOST);

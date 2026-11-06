@@ -41,13 +41,22 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: lume_admin
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_CLAVE_ADMIN:?Falta RABBITMQ_CLAVE_ADMIN}
+      # Un usuario por servicio con permisos mínimos (ADR-006); los crea rabbitmq/usuarios.sh al arrancar
+      SEGURIDAD_RABBIT_CLAVE: ${SEGURIDAD_RABBIT_CLAVE:?Falta SEGURIDAD_RABBIT_CLAVE}
+      VISITAS_RABBIT_CLAVE: ${VISITAS_RABBIT_CLAVE:?Falta VISITAS_RABBIT_CLAVE}
+      REPORTES_RABBIT_CLAVE: ${REPORTES_RABBIT_CLAVE:?Falta REPORTES_RABBIT_CLAVE}
+      NOTIFICACIONES_RABBIT_CLAVE: ${NOTIFICACIONES_RABBIT_CLAVE:?Falta NOTIFICACIONES_RABBIT_CLAVE}
+      GATEWAY_RABBIT_CLAVE: ${GATEWAY_RABBIT_CLAVE:?Falta GATEWAY_RABBIT_CLAVE}
+    command: ["sh", "-c", "/opt/lume/usuarios.sh & exec docker-entrypoint.sh rabbitmq-server"]
     ports:
       - "127.0.0.1:${RABBITMQ_PUERTO:?Falta RABBITMQ_PUERTO}:5672"
       - "127.0.0.1:${RABBITMQ_CONSOLA_PUERTO:?Falta RABBITMQ_CONSOLA_PUERTO}:15672"
     volumes:
       - rabbitmq-datos:/var/lib/rabbitmq
+      - ./rabbitmq/usuarios.sh:/opt/lume/usuarios.sh:ro
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # Sano solo cuando el nodo responde Y ya existen los usuarios de servicio (así --wait no arranca servicios antes)
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping && test -f /var/lib/rabbitmq/.usuarios-lume-listos"]
       interval: 10s
       timeout: 5s
       retries: 12

@@ -133,6 +133,16 @@ describe('interceptorApi (como shared/api.ts del monolito)', () => {
     await p;
   });
 
+  it('si la cookie CSRF aparece un instante después de la respuesta de inicio (WebKit), la escritura la espera y va con la cabecera', async () => {
+    const p = firstValueFrom(http.post('/api/auth/clave/consultar', { tkn: 'x' }));
+    ctrl.expectOne('/api/auth/inicio').flush({ captchaSitio: null, captchaDesactivado: true, csrf: 'X-XSRF-TOKEN' });
+    setTimeout(() => (document.cookie = 'XSRF-TOKEN=tarde; path=/'), 60);
+    const r = await vi.waitFor(() => ctrl.expectOne('/api/auth/clave/consultar'));
+    expect(r.request.headers.get('X-XSRF-TOKEN')).toBe('tarde');
+    r.flush({ valido: false });
+    await p;
+  });
+
   it('401 con motivo de cierre (no sin_sesion) fuera de /api/auth: guarda el motivo y va al ingreso por el gateway', async () => {
     const p = firstValueFrom(http.get('/api/usuarios'));
     const m = 'Su sesión se cerró porque su usuario ingresó desde otro equipo o navegador. Solo se permite una sesión a la vez.';

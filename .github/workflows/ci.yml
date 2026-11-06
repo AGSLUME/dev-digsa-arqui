@@ -34,10 +34,13 @@ jobs:
       - name: Resumen de pruebas
         if: always()
         run: |
+          # Se cuenta desde los TEST-*.xml (un <testcase> por prueba ejecutada): los .txt resumen por clase y no cuentan las anidadas.
           for d in librerias/* servicios/*; do
-            [ -d "$d/target/surefire-reports" ] || continue
-            awk -F'[:,]' '/^Tests run/ {r+=$2; f+=$4; e+=$6} END {printf "%s: %d pruebas, %d fallos, %d errores\n", FILENAME, r, f, e}' \
-              "$d"/target/surefire-reports/*.txt | sed "s|$d/target/surefire-reports/[^:]*|$d|" >> "$GITHUB_STEP_SUMMARY"
+            r="$d/target/surefire-reports"
+            [ -d "$r" ] || continue
+            total=$(cat "$r"/TEST-*.xml | grep -o '<testcase ' | wc -l)
+            fallos=$(cat "$r"/TEST-*.xml | grep -cE '<(failure|error) ' || true)
+            echo "$d: $total pruebas, $fallos fallos o errores" >> "$GITHUB_STEP_SUMMARY"
           done
 
   frontend:

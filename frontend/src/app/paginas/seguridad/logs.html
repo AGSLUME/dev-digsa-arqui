@@ -1,0 +1,134 @@
+<div class="lume-pila">
+  <lume-encabezado-pagina titulo="Logs del sistema" fuente="Anexo 5 · 3 · ítem 15" />
+
+  <form class="lume-pila" [lumeValidacion]="vFiltros" novalidate role="search" aria-label="Filtros de los logs" (submit)="$event.preventDefault(); buscar()">
+    <div class="lume-rejilla-4">
+      <lume-campo etiqueta="Desde" descripcion="Formato DD/MM/AAAA (día, mes y año)." [error]="vFiltros.error('desde')">
+        <lume-fecha #campoDesde [(valor)]="desde" (valorChange)="cambioDeFecha()" />
+      </lume-campo>
+      <lume-campo etiqueta="Hasta" descripcion="Formato DD/MM/AAAA (día, mes y año)." [error]="vFiltros.error('hasta')">
+        <lume-fecha #campoHasta [(valor)]="hasta" (valorChange)="cambioDeFecha()" />
+      </lume-campo>
+      <lume-campo etiqueta="Usuario">
+        <lume-selector [opciones]="usuarios()" [(valor)]="usuarioId" buscable limpiable />
+      </lume-campo>
+      <lume-campo etiqueta="Operación">
+        <lume-selector [opciones]="operaciones()" [(valor)]="operacion" limpiable />
+      </lume-campo>
+      <lume-campo etiqueta="Módulo">
+        <lume-selector [opciones]="modulos()" [(valor)]="modulo" buscable limpiable />
+      </lume-campo>
+      <lume-campo etiqueta="Tipo" descripcion="Exacto, p. ej. usuario_editado">
+        <input lumeEntrada maxlength="50" autocomplete="off" spellcheck="false" [value]="tipo()" (input)="tipo.set($any($event.target).value)" />
+      </lume-campo>
+      <lume-campo etiqueta="Texto" descripcion="Con texto, el periodo es de máximo 92 días" [error]="vFiltros.error('texto')">
+        <input lumeEntrada maxlength="80" autocomplete="off" [value]="texto()" (input)="texto.set($any($event.target).value); vFiltros.limpiar('texto')" />
+      </lume-campo>
+    </div>
+    <div class="lume-fila">
+      <button lumeBoton type="submit">Buscar</button>
+      <button lumeBoton="secundario" type="button" [cargando]="descargando() === 'xlsx'" (click)="descargar('xlsx')">Descargar Excel</button>
+      <button lumeBoton="secundario" type="button" [cargando]="descargando() === 'csv'" (click)="descargar('csv')">Descargar CSV</button>
+      <button lumeBoton="secundario" type="button" (click)="abrirEnvio()">Enviar por correo</button>
+    </div>
+    <lume-resumen-errores [validacion]="vFiltros" />
+    <lume-resumen-errores [validacion]="vDescarga" />
+  </form>
+
+  @if (errorLista(); as e) {
+    <lume-alerta color="red">{{ e }}</lume-alerta>
+  }
+  @if (errorOpciones(); as e) {
+    <lume-alerta color="red">No se pudieron cargar los filtros: {{ e }}</lume-alerta>
+  }
+
+  <p class="lume-solo-lector" role="status">{{ anuncio() }}</p>
+  <div lumeTablaAdaptable="Logs del sistema">
+    <table class="lume-tabla lume-tabla--min-860" data-testid="tabla-logs" aria-label="Logs del sistema">
+      <thead>
+        <tr>
+          <th>Fecha y hora</th>
+          <th>Usuario</th>
+          <th>Operación</th>
+          <th>Tipo</th>
+          <th>Detalle</th>
+          <th>IP</th>
+          <th>Cambios</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (f of filas(); track f.id) {
+          <tr tabindex="-1">
+            <td class="lume-sin-cortes">{{ fechaHora(f.fecha, { segundos: true }) }}</td>
+            <td class="lume-partir">{{ f.usuario ?? '—' }}</td>
+            <td><lume-insignia>{{ nombreOperacion(f.operacion) }}</lume-insignia></td>
+            <td class="lume-partir">{{ f.tipo }}</td>
+            <td class="lume-partir">{{ f.descripcion }}</td>
+            <td class="lume-partir">{{ f.ip }}</td>
+            <td>
+              @if (f.cambios?.length) {
+                <!-- El nombre empieza por el texto visible (2.5.3): «Ver (2) cambios del registro 17» -->
+                <button lumeBoton="secundario" tamano="pequeno" type="button" (click)="cambiosDe.set(f)">
+                  Ver ({{ conteo(f.cambios!.length) }})<span class="lume-solo-lector"> cambios del registro {{ f.id }}</span>
+                </button>
+              }
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+  @if (!cargando() && filas().length === 0 && !errorLista()) {
+    <p class="lume-apagado" role="status">No hay registros con estos filtros.</p>
+  }
+  @if (siguiente()) {
+    <div>
+      <button lumeBoton="secundario" type="button" [cargando]="cargandoMas()" (click)="verMas()">Ver más</button>
+    </div>
+  }
+</div>
+
+<lume-modal [abierto]="cambiosDe() !== null" titulo="Antes y después" ancho="lg" (cerrar)="cambiosDe.set(null)">
+  <ng-template lumeCuerpoModal>
+    @if (cambiosDe(); as f) {
+      <div class="lume-pila">
+        <p class="lume-texto-pequeno">{{ fechaHora(f.fecha, { segundos: true }) }} · {{ f.usuario ?? '—' }} · {{ f.tipo }}</p>
+        <div lumeTablaAdaptable="Antes y después">
+          <table class="lume-tabla lume-tabla--min-480" data-testid="tabla-cambios" aria-label="Cambios del registro">
+            <thead>
+              <tr><th>Campo</th><th>Antes</th><th>Después</th></tr>
+            </thead>
+            <tbody>
+              @for (c of f.cambios ?? []; track $index + '-' + c.campo) {
+                <tr>
+                  <td>{{ c.campo }}</td>
+                  @if (c.oculto) {
+                    <td colspan="2" class="lume-apagado">Modificado (dato personal: no se guarda el valor, Ley 1581)</td>
+                  } @else {
+                    <td class="lume-partir">{{ c.antes ?? '—' }}</td>
+                    <td class="lume-partir">{{ c.despues ?? '—' }}</td>
+                  }
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    }
+  </ng-template>
+</lume-modal>
+
+<lume-modal [abierto]="envioAbierto()" titulo="Enviar logs por correo" (cerrar)="envioAbierto.set(false)">
+  <ng-template lumeCuerpoModal>
+    <form class="lume-pila" [lumeValidacion]="vEnvio" novalidate (submit)="$event.preventDefault(); enviar()">
+      <lume-resumen-errores [validacion]="vEnvio" />
+      <lume-campo etiqueta="Correo de destino" [error]="vEnvio.error('para')">
+        <input lumeEntrada type="email" maxlength="150" autocomplete="email" [value]="para()" (input)="para.set($any($event.target).value); vEnvio.limpiar('para')" />
+      </lume-campo>
+      <p class="lume-texto-pequeno lume-apagado">Se envía el reporte en Excel con los filtros actuales.</p>
+      <div class="lume-modal__acciones">
+        <button lumeBoton type="submit" [cargando]="enviando()">Enviar</button>
+      </div>
+    </form>
+  </ng-template>
+</lume-modal>
