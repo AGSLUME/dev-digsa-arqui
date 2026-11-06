@@ -23,10 +23,15 @@ Hay flujos asíncronos entre servicios: auditoría (todos → `seguridad`), corr
     | `seguridad.eventos` | visitas, reportes | `usuario.*`, `cuenta.*` |
     | `visitas.eventos` | reportes | `visita.*`, `hallazgo.*` |
     | `visitas.eventos` | notificaciones | `alerta.*`, `aviso.*` |
-    | `visitas`/`reportes`/`notificaciones.eventos` | seguridad | `auditoria.*` |
+    | `visitas.eventos` | seguridad | `auditoria.*`, `punto.*`, `regional.*`, `fuerza.*` (copia de maestros) |
+    | `reportes`/`notificaciones.eventos` | seguridad | `auditoria.*` |
+    | `notificaciones.eventos` | visitas | `envio.*` (resultado del envío con su referencia, p. ej. `acta:{id}`; D-N1) |
 
   - Convención de claves: lo que debe notificarse a una persona sale como `aviso.<tipo>` (p. ej. `aviso.solicitud_nueva`) y lo crítico como `alerta.<tipo>`; la auditoría como `auditoria.<tipo>`. Una clave o un consumidor nuevo se pide a la integradora, que amplía la matriz.
   - Tope de mensaje 256 KiB (`max_message_size`). TLS de AMQP en el cierre (I9).
+- **Auditoría por el outbox** (decisión 2026-11-06, a pedido de visitas-a): `PublicadorAuditoria` tiene dos formas y **ninguna se envuelve en un `catch` que trague el error**:
+  - `publicar(evento)`: en la **misma transacción** del cambio. Si el INSERT del outbox falla, la operación falla (no hay cambio sin rastro). Es la forma para auditar lo que sí ocurrió.
+  - `publicarIndependiente(evento)`: en una **transacción propia** (`REQUIRES_NEW`), para auditar lo que fracasa o se deniega (ingreso o captcha fallido, código errado, 403, bloqueo), cuya transacción principal se revierte. Es lo que hacía el monolito con `REQUIRES_NEW`.
 - Los mensajes no llevan secretos en claro (códigos, enlaces, contraseñas) ni datos personales que no se necesiten.
 
 ## Consecuencias

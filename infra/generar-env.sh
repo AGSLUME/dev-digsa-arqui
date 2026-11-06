@@ -58,6 +58,7 @@ MONOLITO_PUERTO=$((9050 + d))
 # URLs que leen los servicios Spring (corren en el host)
 LUME_EMISOR=http://localhost:$gw
 LUME_SEGURIDAD_URL=http://localhost:$((9101 + d))
+LUME_VISITAS_URL=http://localhost:$((9102 + d))
 LUME_HOLA_URL=http://localhost:$((9109 + d))
 LUME_URL_SEGURA=false
 LUME_FRONTEND_URL=http://localhost:$((4200 + d / 10))

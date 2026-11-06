@@ -1,0 +1,4 @@
+# Solo pruebas. Valores ficticios; no son secretos de ningún entorno.
+lume:
+  archivos:
+    carpeta: ${java.io.tmpdir}/lume-pruebas/visitas/archivos

@@ -47,7 +47,8 @@ services:
       REPORTES_RABBIT_CLAVE: ${REPORTES_RABBIT_CLAVE:?Falta REPORTES_RABBIT_CLAVE}
       NOTIFICACIONES_RABBIT_CLAVE: ${NOTIFICACIONES_RABBIT_CLAVE:?Falta NOTIFICACIONES_RABBIT_CLAVE}
       GATEWAY_RABBIT_CLAVE: ${GATEWAY_RABBIT_CLAVE:?Falta GATEWAY_RABBIT_CLAVE}
-    command: ["sh", "-c", "/opt/lume/usuarios.sh & exec docker-entrypoint.sh rabbitmq-server"]
+    # Como el usuario rabbitmq: si corriera como root crearía .erlang.cookie con dueño root y el nodo no arrancaría (lo detectó seguridad)
+    command: ["sh", "-c", "gosu rabbitmq /opt/lume/usuarios.sh & exec docker-entrypoint.sh rabbitmq-server"]
     ports:
       - "127.0.0.1:${RABBITMQ_PUERTO:?Falta RABBITMQ_PUERTO}:5672"
       - "127.0.0.1:${RABBITMQ_CONSOLA_PUERTO:?Falta RABBITMQ_CONSOLA_PUERTO}:15672"
