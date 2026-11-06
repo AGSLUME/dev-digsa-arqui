@@ -40,18 +40,60 @@ info:
        - `para` y `copia` (correos; para es obligatorio, 1..500; la bandeja parte de a 100).
        - `critico` (booleano, opcional).
        - `secretoEn` (opcional): ruta `/interno/...` del servicio de origen donde `notificaciones` pide, **en cada intento**, lo que no
-         puede viajar por RabbitMQ: los valores secretos y los adjuntos. Patrón T1 de visitas-b. Para el acta es
-         `GET /interno/avisos/acta/{id}` (alcance `visitas:avisos`). Nada de eso se guarda, salvo el enlace **oculto** en el registro.
+         puede viajar por RabbitMQ: los bloques con secreto y los adjuntos. Patrón T1 de visitas-b. Para el acta es
+         `GET /interno/avisos/acta/{id}` (alcance `visitas:avisos`). Con `secretoEn`, `para` tiene como máximo 100 correos (no se
+         parte). Nada de eso se guarda, salvo el enlace **oculto** en el registro.
+
+       **Respuesta que espera `notificaciones` de `secretoEn`** (la implementa el servicio de origen; esquema `SecretoAviso`):
+       - Un objeto `bloques` con las variables bloque que llevan el secreto (en el acta, `hallazgos`, que lleva el enlace del OPL).
+         Cada una trae tres variantes de HTML de lista blanca:
+         - `para`: con el secreto;
+         - `copia`: sin el secreto (en el acta, los plazos sin el enlace);
+         - `registro`: con el secreto oculto (`[enlace oculto]` o `••••••`).
+       - Un arreglo `adjuntos` con `{nombre, tipo, base64}` (el PDF del acta), de 10 MB en total como máximo.
+       - En los bloques de `secretoEn`, `<a href>` solo se admite si la URL es https y apunta al origen de `LUME_FRONTEND_URL`
+         (http solo en local). En los bloques que llegan por RabbitMQ no se admite ningún enlace.
+
+       **Regla B5 (el secreto solo va a los destinatarios obligatorios; pedida por visitas-b y fijada por la integradora el 2026-11-06).**
+       - `para` son los obligatorios y `copia` el resto.
+       - Es **un** envío, con **una** referencia y **un** `envio.resultado`. Internamente salen dos mensajes SMTP: el de `para`, con las
+         variantes `para`, y el de `copia`, que es el **mismo** correo con las variantes `copia` y sin el secreto. Los adjuntos van a
+         los dos.
+       - El resultado lo decide el mensaje de `para`:
+         - si `para` sale, el aviso queda `enviado`, aunque `copia` falle; el fallo de `copia` queda en la bitácora como `parcial`, con
+           su error;
+         - si `para` se agota, el aviso queda `agotado`.
+       - Mientras `para` no salga, cada intento reenvía los dos mensajes. Cuando `para` ya salió, solo se reintenta `copia`, y sin
+         publicar otro resultado.
+       - En el registro (1 año) se guardan los dos cuerpos: el de `para` con el secreto oculto (variantes `registro`) y el de `copia`
+         tal como salió. La vista previa de Correos los muestra los dos.
+
+       Ejemplo de acta con B5 (`aviso.acta_generada`, `datos`):
+       ```json
+       {"referencia": "acta:15:1", "plantilla": "acta", "critico": true,
+        "variables": {"tipo_acta": "Acta de visita", "numero": "VIS-2026-0015", "punto": "ESM Ficticio Norte", "complemento": "", "ronda": "", "huella": "9f2c…"},
+        "para": ["sanidad.ejc@visitas-b.prueba.local", "opl@visitas-b.prueba.local", "digsa@visitas-b.prueba.local"],
+        "copia": ["lider@visitas-b.prueba.local", "auditado@visitas-b.prueba.local"],
+        "secretoEn": "/interno/avisos/acta/15"}
+       ```
+       Y la respuesta de `GET /interno/avisos/acta/15`:
+       ```json
+       {"bloques": {"hallazgos": {
+           "para": "<p>Plazos …</p><p><a href=\"https://lume.ejemplo/opl/responder?t=…\">Responder los hallazgos</a></p>",
+           "copia": "<p>Plazos …</p>",
+           "registro": "<p>Plazos …</p><p>[enlace oculto]</p>"}},
+        "adjuntos": [{"nombre": "Acta_VIS-2026-0015_ronda1.pdf", "tipo": "application/pdf", "base64": "JVBERi0…"}]}
+       ```
 
        Tipos conocidos (de los encolados del monolito y D-N1):
-       - `aviso.acta_generada`;
+       - `aviso.acta_generada` (con `critico: true`: si se agota dispara `correo_agotado` al administrador, D-N1);
        - `aviso.solicitud_nueva`, `aviso.solicitud_agendada` y `aviso.solicitud_cancelada`;
        - `aviso.recordatorio_seguimiento`.
 
        Un tipo nuevo se pide a la integradora. El `origen` en la bitácora es el `<tipo>` sin `aviso.`, salvo `acta_generada` → `acta`.
 
-       **Resultado:** solo los avisos con `referencia` publican `envio.resultado`, al quedar `enviado` o `parcial` (estado `enviado`) o
-       al agotarse (estado `agotado`).
+       **Resultado:** solo los avisos con `referencia` publican `envio.resultado`, al quedar `enviado` (incluido un rechazo parcial) o
+       al agotarse (estado `agotado`). Con B5, lo decide el mensaje de `para`.
 
     2. **`alerta.<tipo>`** en `visitas.eventos` y `reportes.eventos` (cola `notificaciones.alertas`). Dispara una alerta del catálogo.
        - Campos de `datos`: `clave` (string 1..120: identifica el problema; la alerta crítica abierta es única por `tipo`+`clave`) y
@@ -157,5 +199,30 @@ components:
             - `enviado`: salió a todos los destinatarios o a parte de ellos. Un rechazo parcial no se reintenta (paridad); el detalle
               queda en la bitácora de Correos.
             - `agotado`: falló en los 5 intentos. Si el aviso era crítico, además dispara la alerta `correo_agotado`.
-        intentos: { type: integer, minimum: 1, maximum: 5 }
+        intentos: { type: integer, minimum: 1, maximum: 5, description: 'Intentos del mensaje de «para».' }
         ultimoError: { type: [string, 'null'], maxLength: 500 }
+    SecretoAviso:
+      type: object
+      description: |
+        Respuesta del `secretoEn` de un aviso. La sirve el servicio de origen (p. ej. `GET /interno/avisos/acta/{id}` de visitas, con
+        alcance `visitas:avisos`) y `notificaciones` la pide en cada intento. Nunca se escribe en logs.
+      required: [bloques, adjuntos]
+      properties:
+        bloques:
+          type: object
+          additionalProperties:
+            type: object
+            required: [para, copia, registro]
+            properties:
+              para: { type: string, maxLength: 200000, description: 'Con el secreto; solo para los de «para».' }
+              copia: { type: string, maxLength: 200000, description: 'Sin el secreto; para los de «copia» (regla B5).' }
+              registro: { type: string, maxLength: 200000, description: 'Con el secreto oculto; es lo que se guarda 1 año.' }
+        adjuntos:
+          type: array
+          items:
+            type: object
+            required: [nombre, tipo, base64]
+            properties:
+              nombre: { type: string, maxLength: 150 }
+              tipo: { type: string, enum: [application/pdf] }
+              base64: { type: string, description: 'Contenido; 10 MB en total como máximo.' }

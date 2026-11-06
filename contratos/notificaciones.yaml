@@ -519,6 +519,12 @@ paths:
         - Si se agota y era crítico, se dispara la alerta `correo_agotado`.
         - No admite adjuntos: los adjuntos de un aviso los pide `notificaciones` al servicio de origen en cada intento (`aviso.*`).
 
+        **Regla B5: los secretos solo van a «para»** (integradora, 2026-11-06).
+        - Por este endpoint no viaja ningún secreto. Los secretos van por `/interno/envios/secreto`, que no admite `copia`, o por el
+          `secretoEn` de un `aviso.*` (`contratos/eventos/notificaciones.yaml`).
+        - Allí los de «copia» reciben el mismo correo sin el bloque secreto, en un segundo mensaje SMTP del mismo envío.
+        - Los enlaces de los `bloques` solo pueden apuntar al origen de `LUME_FRONTEND_URL`.
+
         **Errores.** Un fallo del servidor de correo **no** es un error HTTP: el modo directo responde 200 con `estado` = `fallido` y
         `error` (sin secretos ni direcciones). Los 4xx son errores de quien llama.
       security:
@@ -759,7 +765,16 @@ components:
           properties:
             para: { type: array, items: { type: string } }
             copia: { type: array, items: { type: string } }
-            html: { type: string, description: 'Correo como se guardó; los secretos aparecen como `••••••` o `[enlace oculto]`.' }
+            html: { type: string, description: 'Correo de «para» como se guardó; los secretos aparecen como `••••••` o `[enlace oculto]`.' }
+            htmlCopia:
+              type: [string, 'null']
+              description: |
+                Solo en avisos con secreto (regla B5): el correo que recibieron los de «copia», sin el bloque secreto. Es null cuando todos
+                recibieron el mismo correo.
+            estadoCopia:
+              type: [string, 'null']
+              enum: [pendiente, enviando, enviado, parcial, fallido, null]
+              description: 'Con B5, estado del mensaje de «copia» (el `estado` del envío es el de «para»).'
             adjuntos:
               type: array
               items:

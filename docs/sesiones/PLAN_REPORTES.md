@@ -114,6 +114,7 @@ Paquetes del monolito que absorbe: `correos`, `alertas`, y de `plataforma` la ba
   - El enlace queda **oculto** en el registro.
   - El resultado sale en `envio.resultado` con la referencia tal cual llegó.
 - Prueba de que un `origen` falsificado va a la DLQ y de que un aviso repetido no envía dos veces.
+- **Regla B5** (integradora, 2026-11-06): el bloque secreto solo va a `para`. `copia` recibe el mismo correo sin él, en un segundo mensaje SMTP del mismo envío, con una sola referencia y un solo `envio.resultado` (lo decide `para`). En el registro quedan los dos cuerpos. Prueba con Mailpit: el de `copia` no contiene el enlace, y el `copia` caído no agota el aviso.
 
 ### R1.5 · Alertas
 
