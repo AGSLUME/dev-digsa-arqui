@@ -391,10 +391,10 @@ const rutas = {
     if (u && ahora() - (estado.ultimoEnlace.get(u.id) ?? 0) >= 5 * MIN) void enviarEnlace(u, 'Recuperación de contraseña').catch(() => undefined);
     r.json({ mensaje: 'Si el usuario o el correo están registrados y activos, le enviamos un enlace para definir una contraseña nueva.' });
   },
-  'GET /api/auth/clave': (req, r) => {
-    const tkn = new URL(req.url, 'http://x').searchParams.get('tkn');
-    if (tkn === null) return r.problema(400, 'La petición no tiene el formato esperado.');
-    const v = enlaceVigente(tkn);
+  // Contrato 0.4.0: el token va en el cuerpo, no en la URL (el monolito usaba GET /api/auth/clave?tkn=)
+  'POST /api/auth/clave/consultar': (_req, r, b) => {
+    if (typeof b.tkn !== 'string') return r.problema(400, 'La petición no tiene el formato esperado.');
+    const v = enlaceVigente(b.tkn);
     r.json(v ? { valido: true, nombre: v.u.nombre } : { valido: false, mensaje: ENLACE_INVALIDO });
   },
   'POST /api/auth/clave': (req, r, b) => {

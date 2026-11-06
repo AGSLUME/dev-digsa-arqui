@@ -1,9 +1,20 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { sinDesplazamientoHorizontal } from './apoyo';
 
 // Componentes del design system que necesita A5 (selector con búsqueda, casillas, interruptor, numérico, fecha, paginación y aviso
 // persistente), en el catálogo de desarrollo (/__catalogo, solo en ng serve). No vienen del monolito: comprueban en navegador real el
 // patrón combobox de ARIA y el teclado, que jsdom no puede. Las pantallas de A5 los usarán con los selectores del monolito.
+
+/**
+ * Texto de la opción resaltada (`aria-activedescendant`), leído DE NUEVO en cada intento: el atributo cambia en el siguiente ciclo de
+ * detección de cambios después de la tecla, así que leerlo una sola vez justo después puede dar la opción anterior (prueba intermitente).
+ */
+function opcionActiva(page: Page, combo: Locator) {
+  return expect.poll(async () => {
+    const id = await combo.getAttribute('aria-activedescendant');
+    return id ? ((await page.locator(`#${id}`).textContent()) ?? '').trim() : null;
+  });
+}
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/__catalogo');
@@ -18,21 +29,20 @@ test('selector sin búsqueda, solo con teclado: abre, recorre, salta por letra, 
   await expect(combo).toHaveAttribute('aria-expanded', 'true');
   const lista = page.getByRole('listbox', { name: 'Fuerza (Sanidad)' });
   await expect(lista.getByRole('option')).toHaveCount(4);
-  const activa = async () => page.locator(`#${await combo.getAttribute('aria-activedescendant')}`);
-  await expect(await activa()).toHaveText('Ejército');
+  await opcionActiva(page, combo).toBe('Ejército');
   await page.keyboard.press('ArrowDown');
-  await expect(await activa()).toHaveText('Armada');
+  await opcionActiva(page, combo).toBe('Armada');
   await page.keyboard.press('End');
-  await expect(await activa()).toHaveText('Policía');
+  await opcionActiva(page, combo).toBe('Policía');
   await page.keyboard.press('Home');
-  await expect(await activa()).toHaveText('Ejército');
+  await opcionActiva(page, combo).toBe('Ejército');
   await page.keyboard.press('f');
-  await expect(await activa()).toHaveText('Fuerza Aérea');
+  await opcionActiva(page, combo).toBe('Fuerza Aérea');
   await page.keyboard.press('Escape');
   await expect(combo).toHaveAttribute('aria-expanded', 'false');
   await expect(combo).toHaveValue('');
   await page.keyboard.press('ArrowUp'); // ↑ cerrado abre en la última
-  await expect(await activa()).toHaveText('Policía');
+  await opcionActiva(page, combo).toBe('Policía');
   await page.keyboard.press('Enter');
   await expect(combo).toHaveValue('Policía');
   await expect(combo).toBeFocused();
@@ -51,7 +61,7 @@ test('selector sin búsqueda: Espacio abre y elige (APG select-only); lo teclead
   await page.keyboard.press(' ');
   await expect(combo).toHaveAttribute('aria-expanded', 'true');
   await page.keyboard.type('ar');
-  await expect(page.locator(`#${await combo.getAttribute('aria-activedescendant')}`)).toHaveText('Armada');
+  await opcionActiva(page, combo).toBe('Armada');
   await page.waitForTimeout(600);
   await page.keyboard.press(' ');
   await expect(combo).toHaveValue('Armada');

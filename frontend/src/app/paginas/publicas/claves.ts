@@ -74,7 +74,8 @@ export class OlvideClave {
 }
 
 /**
- * «Definir contraseña» con el enlace del correo (port de DefinirClave en Claves.tsx): valida el enlace (`GET /api/auth/clave?tkn=`) y
+ * «Definir contraseña» con el enlace del correo (port de DefinirClave en Claves.tsx): valida el enlace (`POST /api/auth/clave/consultar`
+ * con `{tkn}` en el cuerpo, contrato 0.4.0; el monolito usaba `GET /api/auth/clave?tkn=`) y
  * define la contraseña (`POST /api/auth/clave`). Sirve para la recuperación y para el primer ingreso.
  */
 @Component({
@@ -142,7 +143,7 @@ export class DefinirClave implements OnInit {
       void this.router.navigate([], { relativeTo: this.ruta, queryParams: { tkn: null }, queryParamsHandling: 'merge', replaceUrl: true });
     }
     try {
-      const r = await firstValueFrom(this.api.consultarEnlace(this.token));
+      const r = await firstValueFrom(this.api.consultarEnlace({ tkn: this.token }));
       this.nombre.set(r.nombre ?? '');
       this.valido.set(r.valido);
     } catch {
