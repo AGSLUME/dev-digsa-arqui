@@ -32,3 +32,4 @@ filtrando por el destinatario (`@angular.prueba.local`, ADR-010); el captcha es 
 | `sesion.spec.ts` | ingreso en dos pasos, contraseña errada, aviso de inactividad, otra pestaña, cierre por inactividad (solo Chromium: espera real), sesión única | contraseña inicial + cierre por el administrador (A5, pantalla Usuarios) |
 | `cuenta-y-seguridad.spec.ts` | cambiar mi contraseña, celular 360 px | TIME OUT y desbloqueo por el administrador (A5) |
 | `responsivo-360.spec.ts` | todas las pantallas del menú a 360 px sin desplazamiento horizontal | — |
+| `teclado.spec.ts` (nuevo, no viene del monolito) | panel del menú en celular con el teclado (foco, Escape, `inert`) y «Ir al contenido» fuera del inicio | — |

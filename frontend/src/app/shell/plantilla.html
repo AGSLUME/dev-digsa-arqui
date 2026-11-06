@@ -1,7 +1,7 @@
 <!-- Con <base href="/"> el ancla iría a «/#contenido»: el salto se hace aquí, en cualquier ruta -->
 <a class="lume-saltar" href="#contenido" (click)="irAlContenido($event)">Ir al contenido</a>
 
-<header class="lume-cabecera" (keydown.escape)="cerrarPanel()">
+<header class="lume-cabecera">
   <div class="lume-cabecera__izquierda">
     @if (celular()) {
       <button
@@ -60,7 +60,6 @@
   class="lume-sidebar"
   aria-label="Módulos"
   [hidden]="celular() && !abierto()"
-  (keydown.escape)="cerrarPanel()"
 >
   <div class="lume-sidebar__cabecera">
     @if (!colapsado()) {

@@ -4,6 +4,12 @@
  */
 export { Boton, BotonConMotivo, type VarianteBoton } from './boton';
 export { Campo, Entrada } from './campo';
+export { Casilla, GrupoCasillas, Interruptor, type OpcionCasilla } from './casillas';
+export { conBarras, Fecha } from './fecha';
+export { errorEntero, leerEntero, Numero } from './numero';
+export { crearPaginacion, Paginacion, paginaDe, POR_PAGINA } from './paginacion';
+export { Selector, type OpcionSelector } from './selector';
+export { Avisos, RegionAvisos } from './avisos';
 export { EncabezadoPagina, tituloDocumento } from './encabezado-pagina';
 export { Alerta, Insignia } from './insignia';
 export { CuerpoModal, Modal } from './modal';

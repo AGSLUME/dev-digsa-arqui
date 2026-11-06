@@ -11,7 +11,8 @@
     "watch": "ng build --watch --configuration development",
     "pretest": "npm run api",
     "test": "ng test",
-    "test:mock": "node --test mock/servidor.test.mjs"
+    "test:mock": "node --test mock/servidor.test.mjs",
+    "lint": "ng lint"
   },
   "private": true,
   "packageManager": "npm@11.17.0",
@@ -32,12 +33,18 @@
     "@angular/cli": "21.2.29",
     "@angular/compiler-cli": "21.2.26",
     "@openapitools/openapi-generator-cli": "2.42.0",
+    "angular-eslint": "21.4.0",
+    "eslint": "10.13.0",
     "jsdom": "28.1.0",
     "prettier": "3.9.10",
     "typescript": "5.9.3",
+    "typescript-eslint": "8.72.0",
     "vitest": "4.1.12"
   },
   "engines": {
     "node": ">=24.19.0 <25"
+  },
+  "overrides": {
+    "basic-ftp": "6.2.3"
   }
 }

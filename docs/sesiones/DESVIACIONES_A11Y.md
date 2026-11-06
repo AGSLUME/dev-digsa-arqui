@@ -38,6 +38,26 @@ ni los textos ni los `data-testid`:
 Quedan como el monolito (mejoras sin bloqueo): grupos del menú lateral sin `role="group"`, «Acceso restringido.» sin h1, ícono de «Menú»
 que no cambia a «×», ayudas emergentes no «hoverables» (repiten el nombre accesible; Escape las cierra en cualquier momento).
 
+## Lint de accesibilidad (`@angular-eslint`, conjunto accessibility)
+
+Primera corrida (2026-11-05, `ng lint` en el CI desde entonces): 3 hallazgos, ninguno choca con la paridad, los 3 corregidos:
+- `lume-campo` aceptaba el id del control con el alias `id`: el mismo id quedaba en el elemento `lume-campo` y en su `<input>` (id
+  repetido). Ahora es `idControl` (prueba en `campo.spec.ts`).
+- El Escape del panel del menú estaba escuchado en `header` y `nav` (contenedores no enfocables): pasó a un escuchador del documento,
+  activo solo con el panel abierto (prueba en `e2e/pruebas/teclado.spec.ts`).
+
+Reglas desactivadas (en su línea, con el motivo en el código):
+- `ui/selector.ts`, opciones del listbox: `click-events-have-key-events` e `interactive-supports-focus`. Falso positivo para el patrón
+  combobox con `aria-activedescendant` (ARIA APG): las opciones no deben recibir foco; el teclado lo atiende el campo `role="combobox"`
+  (↑↓, Inicio/Fin, Enter, Escape, letra) y el clic es solo para el puntero. Probado con teclado en `e2e/pruebas/componentes.spec.ts`.
+
+## Pendiente de probar con NVDA (junto con D1–D3)
+
+| # | Qué | Dónde | Comportamiento (= monolito) | Qué verificar |
+|---|---|---|---|---|
+| D4 | Confirmaciones con `window.confirm` nativo | Usuarios y Roles adicionales (A5): desbloquear, cerrar la sesión, quitar un rol… | Diálogo nativo del navegador, como en el monolito (las e2e lo aceptan con `page.once('dialog')`) | Que NVDA lea el texto y los botones en Chrome, Edge y Firefox; que el foco vuelva al botón. Si falla, alternativa: `lume-modal` con `role="alertdialog"`, cambiando las e2e a `getByRole('alertdialog')` |
+| D5 | Selector (combobox) | `ui/selector.ts` | Nuevo en Angular (Mantine Select en el monolito) | Que NVDA anuncie la opción resaltada al moverse con ↑↓ (`aria-activedescendant`) y el número de resultados al filtrar (región `role="status"`) |
+
 ## Mejoras ya aplicadas (no son desviaciones)
 
 Enlaces y botones azules dentro de alertas a --lume-blue (bloqueante AA corregido, con prueba en `tema.spec.ts`), reflow de botones e

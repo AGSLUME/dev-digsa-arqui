@@ -56,3 +56,9 @@ test('el control /__mock/* exige la cabecera propia', async () => {
 test('una escritura sin CSRF responde 419', async () => {
   assert.equal(await pedir('/api/auth/ingreso', { metodo: 'POST' }), 419);
 });
+
+test('contrato 0.4.0: la consulta del enlace es POST /api/auth/clave/consultar (el GET de la URL ya no existe)', async () => {
+  assert.equal(await pedir('/api/auth/clave?tkn=x'), 404);
+  // Sin CSRF, el POST responde 419 (existe y exige la cabecera)
+  assert.equal(await pedir('/api/auth/clave/consultar', { metodo: 'POST' }), 419);
+});

@@ -28,8 +28,10 @@ describe('Definir contraseña (DefinirClave de Claves.tsx)', () => {
     const harness = await RouterTestingHarness.create();
     await harness.navigateByUrl(`/definir-clave?tkn=${TKN}`);
     const ctrl = TestBed.inject(HttpTestingController);
-    const consulta = await vi.waitFor(() => ctrl.expectOne((r) => r.url === '/api/auth/clave' && r.method === 'GET'));
-    expect(consulta.request.params.get('tkn')).toBe(TKN);
+    // Contrato 0.4.0: POST con el token en el cuerpo (nunca en la URL de la petición)
+    const consulta = await vi.waitFor(() => ctrl.expectOne((r) => r.url === '/api/auth/clave/consultar' && r.method === 'POST'));
+    expect(consulta.request.body).toEqual({ tkn: TKN });
+    expect(consulta.request.urlWithParams).not.toContain(TKN);
     await vi.waitFor(() => expect(TestBed.inject(Router).url).toBe('/definir-clave'));
     consulta.flush({ valido: true, nombre: 'Usuario Ficticio' });
     const el = harness.routeNativeElement!;

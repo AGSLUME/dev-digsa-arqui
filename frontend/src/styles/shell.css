@@ -470,6 +470,10 @@ html:has(.lume-shell) {
 .lume-avisos > * {
   pointer-events: auto;
 }
+/* Con un aviso a la vista (el persistente puede quedarse), el foco no queda debajo de él al desplazarse (2.4.11) */
+html:has(.lume-avisos .lume-aviso) {
+  scroll-padding-bottom: 140px;
+}
 .lume-aviso {
   position: relative;
   padding-right: 40px;
@@ -559,4 +563,12 @@ h1.lume-h3 {
 }
 .lume-turnstile:empty {
   display: none;
+}
+
+/* Catálogo de componentes (solo desarrollo) */
+.lume-catalogo {
+  display: block;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px 16px;
 }
