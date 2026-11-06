@@ -703,3 +703,310 @@ form:not([novalidate]) .lume-entrada:user-invalid {
 .lume-modal--centrado {
   text-align: center;
 }
+
+/* ---------- Casillas e interruptor (Checkbox y Switch del monolito) ---------- */
+.lume-casilla,
+.lume-interruptor {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 24px;
+}
+.lume-casilla__control {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--lume-blue-active);
+  cursor: pointer;
+}
+/* Sin marcar, el mismo borde 3:1 que los campos (estilos.css del monolito). Con :where() no pesa más que el foco ni el error */
+.lume-casilla__control:where(:not(:checked):not(:disabled)) {
+  outline: 1px solid var(--lume-text-muted);
+  outline-offset: -1px;
+  border-radius: 3px;
+}
+.lume-casilla__control:focus-visible,
+.lume-interruptor__control:focus-visible + .lume-interruptor__pista {
+  outline: 2px solid var(--lume-blue-active);
+  outline-offset: 2px;
+}
+.lume-casilla__control[aria-invalid='true'] {
+  outline: 2px solid var(--lume-danger);
+  outline-offset: 0;
+}
+.lume-casilla__texto {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.lume-casilla__etiqueta {
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.lume-casilla__descripcion {
+  font-size: 12px;
+  color: var(--lume-neutral-text);
+}
+.lume-grupo-casillas__fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.lume-grupo-casillas__lista {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+/* Interruptor: la casilla nativa (role="switch") queda encima de la pista, transparente: el clic y el teclado son suyos */
+.lume-interruptor {
+  position: relative;
+}
+.lume-interruptor__control {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.lume-interruptor__pista {
+  flex: none;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--lume-white);
+  border: 1px solid var(--lume-text-muted);
+  transition: background-color 0.15s;
+}
+.lume-interruptor__pista::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--lume-text-muted);
+  transition: transform 0.15s;
+}
+.lume-interruptor__control:checked + .lume-interruptor__pista {
+  background: var(--lume-blue-active);
+  border-color: var(--lume-blue-active);
+}
+.lume-interruptor__control:checked + .lume-interruptor__pista::after {
+  transform: translateX(16px);
+  background: var(--lume-white);
+}
+.lume-interruptor__control:disabled + .lume-interruptor__pista {
+  opacity: 0.5;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lume-interruptor__pista,
+  .lume-interruptor__pista::after {
+    transition: none;
+  }
+}
+@media (forced-colors: active) {
+  .lume-interruptor__pista,
+  .lume-interruptor__pista::after {
+    border: 1px solid CanvasText;
+  }
+  .lume-interruptor__control:checked + .lume-interruptor__pista::after {
+    background: CanvasText;
+  }
+}
+
+/* ---------- Selector (combobox) ---------- */
+.lume-selector {
+  display: block;
+}
+.lume-selector__control {
+  position: relative;
+}
+.lume-selector__control .lume-entrada {
+  padding-right: 40px;
+  cursor: pointer;
+}
+.lume-selector__control .lume-entrada:not([readonly]) {
+  cursor: text;
+}
+/* Sin búsqueda el campo es de solo lectura, pero no está deshabilitado: blanco como el Select de Mantine (no el gris de readonly) */
+.lume-selector__control .lume-entrada[readonly]:not(:disabled):not([aria-invalid='true']) {
+  background-color: var(--lume-white);
+}
+.lume-selector__flecha {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  color: var(--lume-neutral-text);
+  pointer-events: none;
+}
+.lume-selector__borrar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: 0 8px 8px 0;
+  background: transparent;
+  color: var(--lume-neutral-text);
+  cursor: pointer;
+}
+.lume-selector__panel {
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--lume-white);
+  border: 1px solid var(--lume-border);
+  border-radius: 8px;
+  box-shadow: var(--lume-shadow);
+  padding: 4px;
+}
+.lume-selector__lista {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lume-selector__opcion {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13.5px;
+  color: var(--lume-text);
+  cursor: pointer;
+}
+/* La resaltada (teclado o puntero): fondo info y borde a la izquierda (no solo color) */
+.lume-selector__opcion--activa {
+  background: var(--lume-info-bg);
+  color: var(--lume-blue);
+  box-shadow: inset 3px 0 0 var(--lume-blue-active);
+}
+.lume-selector__opcion[aria-selected='true'] {
+  font-weight: 600;
+}
+.lume-selector__opcion[aria-selected='true']::after {
+  content: '✓';
+  content: '✓' / '';
+  margin-left: auto;
+  padding-left: 8px;
+}
+.lume-selector__vacio {
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--lume-neutral-text);
+}
+@media (forced-colors: active) {
+  .lume-selector__opcion--activa {
+    outline: 2px solid Highlight;
+  }
+}
+
+/* ---------- Fecha ---------- */
+.lume-fecha {
+  display: block;
+  position: relative;
+}
+.lume-fecha .lume-entrada {
+  padding-right: 44px;
+}
+.lume-fecha__calendario {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: 0 8px 8px 0;
+  background: transparent;
+  color: var(--lume-neutral-text);
+  cursor: pointer;
+}
+/* El input nativo solo da el calendario: invisible y sin ocupar espacio, pero anclado al campo para que el calendario salga ahí */
+.lume-fecha__nativo {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  border: 0;
+  padding: 0;
+}
+
+/* ---------- Paginación ---------- */
+.lume-paginacion {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.lume-paginacion__total {
+  font-size: 13px;
+  color: var(--lume-neutral-text);
+}
+.lume-paginacion__botones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.lume-paginacion__boton {
+  display: grid;
+  place-items: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  border: 1px solid var(--lume-border);
+  border-radius: 6px;
+  background: var(--lume-white);
+  color: var(--lume-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.lume-paginacion__boton:hover:not([aria-disabled='true']) {
+  background: var(--lume-bg);
+}
+.lume-paginacion__boton--actual {
+  background: var(--lume-blue-active);
+  border-color: var(--lume-blue-active);
+  color: var(--lume-white);
+  font-weight: 600;
+}
+.lume-paginacion__boton--actual:hover {
+  background: var(--lume-blue);
+}
+.lume-paginacion__boton[aria-disabled='true'] {
+  color: var(--lume-neutral-text);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+@media (forced-colors: active) {
+  .lume-paginacion__boton--actual {
+    border-width: 2px;
+    outline: 2px solid Highlight;
+  }
+}
+.lume-paginacion__salto {
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  color: var(--lume-neutral-text);
+}

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, Injectable, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DOCUMENT, inject, Injectable, signal } from '@angular/core';
 import { Alerta } from './insignia';
 
 export interface Aviso {
@@ -9,17 +9,18 @@ export interface Aviso {
 
 /**
  * Avisos de éxito que se cierran solos (el `notifications.show` de Mantine del monolito, 4 s): solo para confirmar algo que salió bien.
- * Los errores no van aquí: van en el resumen de la validación, junto al formulario (Anexo 5 num. 2.4).
+ * Con `ms = null` el aviso no se cierra solo (el naranja del monolito con `autoClose: false`, p. ej. «el correo de bienvenida no
+ * salió»): se queda hasta que la persona lo cierra. Los errores de un formulario no van aquí: van en el resumen de la validación.
  */
 @Injectable({ providedIn: 'root' })
 export class Avisos {
   private siguiente = 0;
   readonly lista = signal<Aviso[]>([]);
 
-  mostrar(mensaje: string, color = 'green', ms = 4000): void {
+  mostrar(mensaje: string, color = 'green', ms: number | null = 4000): void {
     const id = ++this.siguiente;
     this.lista.update((l) => [...l, { id, color, mensaje }]);
-    setTimeout(() => this.quitar(id), ms);
+    if (ms !== null) setTimeout(() => this.quitar(id), ms);
   }
 
   quitar(id: number): void {
@@ -32,7 +33,15 @@ export class Avisos {
   selector: 'lume-avisos',
   imports: [Alerta],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'lume-avisos', role: 'status', 'aria-live': 'polite' },
+  // Solo se lee lo que llega (no todo de nuevo con cada aviso); Escape cierra el último persistente si no hay un modal abierto
+  host: {
+    class: 'lume-avisos',
+    role: 'status',
+    'aria-live': 'polite',
+    'aria-atomic': 'false',
+    'aria-relevant': 'additions',
+    '(document:keydown.escape)': 'cerrarConEscape()',
+  },
   template: `
     @for (a of avisos.lista(); track a.id) {
       <lume-alerta class="lume-aviso" [color]="a.color" rol="none">
@@ -46,4 +55,11 @@ export class Avisos {
 })
 export class RegionAvisos {
   protected readonly avisos = inject(Avisos);
+  private readonly documento = inject(DOCUMENT);
+
+  protected cerrarConEscape(): void {
+    const lista = this.avisos.lista();
+    if (lista.length === 0 || this.documento.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+    this.avisos.quitar(lista[lista.length - 1]!.id);
+  }
 }
